@@ -2915,6 +2915,15 @@ impl CachedRenderPipelinePhaseItem for Shadow {
     }
 }
 
+/// The cascades of directional lights, by their number, whose
+/// shadow map is kept from an earlier frame: the shadow pass does not draw
+/// them this frame, and their layer of the shadow map stays as it is. Who
+/// sets this must also give those cascades, in `Cascades`, the layout they
+/// were last drawn with. Without the resource, or with it empty, every
+/// cascade is drawn every frame, as before.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct KeptShadowCascades(pub HashSet<u32>);
+
 pub const EARLY_SHADOW_PASS: bool = false;
 pub const LATE_SHADOW_PASS: bool = true;
 
@@ -3036,6 +3045,16 @@ fn view_shadow_pass<const IS_LATE: bool>(
     ctx: &mut RenderContext,
 ) {
     if IS_LATE && !occlusion_culling {
+        return;
+    }
+
+    // A kept cascade is not drawn (see `KeptShadowCascades`).
+    if let Some(LightEntity::Directional { cascade_index, .. }) =
+        world.get::<LightEntity>(view_light_entity)
+        && world
+            .get_resource::<KeptShadowCascades>()
+            .is_some_and(|kept| kept.0.contains(&(*cascade_index as u32)))
+    {
         return;
     }
 
