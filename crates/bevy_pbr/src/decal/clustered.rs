@@ -25,6 +25,7 @@ use bevy_asset::{AssetId, Handle};
 use bevy_camera::visibility::ViewVisibility;
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
+    component::Component,
     entity::{Entity, EntityHashMap},
     query::With,
     resource::Resource,
@@ -33,7 +34,7 @@ use bevy_ecs::{
 };
 use bevy_image::Image;
 use bevy_light::{ClusteredDecal, DirectionalLightTexture, PointLightTexture, SpotLightTexture};
-use bevy_math::{Mat4, Vec3};
+use bevy_math::{Affine3A, Mat4, Vec3};
 use bevy_platform::collections::HashMap;
 use bevy_render::{
     render_asset::RenderAssets,
@@ -53,6 +54,29 @@ use bevy_transform::components::GlobalTransform;
 use bytemuck::{Pod, Zeroable};
 
 use crate::{binding_arrays_are_usable, prepare_lights, GlobalClusterableObjectMeta};
+
+// A seam for light textures that do not lie across their light.
+/// Where a [`DirectionalLightTexture`] lies, when that is not across the
+/// light. Put it on the light beside the texture.
+///
+/// Without it the texture is read in the light's own space, at that space's
+/// x and y: across the light's rays, placed and sized by the light's
+/// transform. With it the texture is read the same way
+/// (`uv = xy * (-0.5, 0.5) + 0.5`) in the space this gives instead, which may
+/// be any affine one: for one, a level plane read along the rays, so that a
+/// texture that repeats over the ground repeats in the light as well, which
+/// a tilted light's own space cannot give.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct LightTextureFrame {
+    /// World space to the texture's space.
+    pub local_from_world: Affine3A,
+    /// Whether the texture fades along the space's z: at 0 and below it
+    /// applies in full, at 1 and above not at all (the light is whole). For
+    /// what casts the shadow being a layer: z is then how far through the
+    /// layer a point is, and what stands above the layer is not shaded by
+    /// it.
+    pub fades_along_z: bool,
+}
 
 /// The number of textures that can be associated with each clustered decal.
 const IMAGES_PER_DECAL: usize = 4;
@@ -282,6 +306,7 @@ pub fn extract_decals(
             &DirectionalLightTexture,
             &GlobalTransform,
             &ViewVisibility,
+            Option<&LightTextureFrame>,
         )>,
     >,
     mut render_decals: ResMut<RenderClusteredDecals>,
@@ -410,23 +435,38 @@ fn extract_directional_light_textures(
             &DirectionalLightTexture,
             &GlobalTransform,
             &ViewVisibility,
+            Option<&LightTextureFrame>,
         )>,
     >,
     render_decals: &mut RenderClusteredDecals,
 ) {
-    for (decal_entity, texture, global_transform, view_visibility) in directional_light_textures {
+    for (decal_entity, texture, global_transform, view_visibility, frame) in
+        directional_light_textures
+    {
         // If the texture is invisible, skip it.
         if !view_visibility.get() {
             continue;
         }
 
+        // The texture's own frame, if it has one. The tag's
+        // first bit says the texture repeats, its second that it fades
+        // along z (pbr_lighting.wesl).
+        let tiled = if texture.tiled { 1 } else { 0 };
+        let (local_from_world, tag) = match frame {
+            Some(frame) => (
+                Mat4::from(frame.local_from_world),
+                tiled | if frame.fades_along_z { 2 } else { 0 },
+            ),
+            None => (global_transform.affine().inverse().into(), tiled),
+        };
+
         render_decals.insert_decal(
             decal_entity,
             [Some(texture.image.id()), None, None, None],
-            global_transform.affine().inverse().into(),
+            local_from_world,
             global_transform.translation(),
             (global_transform.scale() * Vec3::ONE).length(),
-            if texture.tiled { 1 } else { 0 },
+            tag,
         );
     }
 }
