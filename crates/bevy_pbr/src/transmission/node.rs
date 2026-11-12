@@ -86,8 +86,16 @@ pub fn main_transmissive_pass_3d(
                 let pass_span =
                     diagnostics.pass_span(&mut render_pass, "main_transmissive_pass_3d");
 
-                if let Some(viewport) = camera.viewport.as_ref() {
-                    render_pass.set_camera_viewport(viewport);
+                // Honour the main pass resolution override (DLSS
+                // renders below the target size) like the `steps == 0` branch
+                // does; upstream used the full viewport here, so transmissive
+                // meshes were drawn at output scale, mostly outside the region
+                // the upscaler reads.
+                if let Some(viewport) = Viewport::from_viewport_and_override(
+                    camera.viewport.as_ref(),
+                    resolution_override,
+                ) {
+                    render_pass.set_camera_viewport(&viewport);
                 }
 
                 if let Err(err) =
