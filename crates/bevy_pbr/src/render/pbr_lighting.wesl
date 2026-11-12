@@ -904,9 +904,13 @@ fn directional_light(
         let local_position = (view_bindings::clustered_decals.decals[(*light).decal_index].local_from_world *
             vec4((*input).P, 1.0)).xyz;
         let decal_uv = local_position.xy * vec2(-0.5, 0.5) + 0.5;
+        // The tag's first bit says the texture repeats (it was
+        // the whole tag), its second that it fades along z
+        // (`LightTextureFrame`, decal/clustered.rs).
+        let decal_tag = view_bindings::clustered_decals.decals[(*light).decal_index].tag;
 
         // if tiled or within tile
-        if (view_bindings::clustered_decals.decals[(*light).decal_index].tag != 0u)
+        if ((decal_tag & 1u) != 0u)
                 || all(clamp(decal_uv, vec2(0.0), vec2(1.0)) == decal_uv)
         {
             let image_index = view_bindings::clustered_decals.decals[(*light).decal_index].base_color_texture_index;
@@ -919,6 +923,9 @@ fn directional_light(
             ).r;
         } else {
             texture_sample = 0f;
+        }
+        if (decal_tag & 2u) != 0u {
+            texture_sample = mix(texture_sample, 1.0, saturate(local_position.z));
         }
     }
 
