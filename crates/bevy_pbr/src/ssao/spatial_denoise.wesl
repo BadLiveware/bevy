@@ -1,3 +1,7 @@
+// `view.main_pass_viewport` wherever this read `view.viewport`. With a main pass
+// resolution override (DLSS, FSR: the scene drawn smaller, in the corner of its pictures) the
+// depth and normals this reads are of the smaller size; by the whole viewport it worked out
+// positions from pixels of the wrong place and worked over pixels nothing reads.
 //! 3x3 bilaterial filter (edge-preserving blur)
 //! https://people.csail.mit.edu/sparis/bf_course/course_notes.pdf
 //!
@@ -25,7 +29,7 @@ import bevy_render::view::View;
 @workgroup_size(8, 8, 1)
 fn spatial_denoise(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let pixel_coordinates = vec2<i32>(global_id.xy);
-    let uv = vec2<f32>(pixel_coordinates) / view.viewport.zw;
+    let uv = vec2<f32>(pixel_coordinates) / view.main_pass_viewport.zw;
 
     let edges0 = textureGather(0, depth_differences, point_clamp_sampler, uv);
     let edges1 = textureGather(0, depth_differences, point_clamp_sampler, uv, vec2<i32>(2i, 0i));

@@ -187,12 +187,14 @@ fn ssao(
         &SsaoPipelineId,
         &SsaoBindGroups,
         &ViewUniformOffset,
+        Option<&bevy_camera::MainPassResolutionOverride>,
     )>,
     pipelines: Res<SsaoPipelines>,
     pipeline_cache: Res<PipelineCache>,
     mut ctx: RenderContext,
 ) {
-    let (camera, pipeline_id, bind_groups, view_uniform_offset) = view.into_inner();
+    let (camera, pipeline_id, bind_groups, view_uniform_offset, resolution_override) =
+        view.into_inner();
 
     let (
         Some(camera_size),
@@ -200,7 +202,15 @@ fn ssao(
         Some(spatial_denoise_pipeline),
         Some(ssao_pipeline),
     ) = (
-        camera.physical_viewport_size,
+        // The size the main pass is drawn at, where it is drawn
+        // smaller than the viewport (a main pass resolution override: DLSS,
+        // FSR). The prepass this reads is of that size, in the corner of
+        // its picture, and so is what reads the result: over the whole
+        // viewport this worked 2.25 times the pixels at DLSS Quality for
+        // nothing. The shaders take the same size (`main_pass_viewport`).
+        resolution_override
+            .map(|size| size.0)
+            .or(camera.physical_viewport_size),
         pipeline_cache.get_compute_pipeline(pipelines.preprocess_depth_pipeline),
         pipeline_cache.get_compute_pipeline(pipelines.spatial_denoise_pipeline),
         pipeline_cache.get_compute_pipeline(pipeline_id.0),
@@ -535,10 +545,21 @@ fn prepare_ssao_textures(
     mut texture_cache: ResMut<TextureCache>,
     render_device: Res<RenderDevice>,
     pipelines: Res<SsaoPipelines>,
-    views: Query<(Entity, &ExtractedCamera, &ScreenSpaceAmbientOcclusion)>,
+    views: Query<(
+        Entity,
+        &ExtractedCamera,
+        &ScreenSpaceAmbientOcclusion,
+        Option<&bevy_camera::MainPassResolutionOverride>,
+    )>,
 ) {
-    for (entity, camera, ssao_settings) in &views {
-        let Some(physical_viewport_size) = camera.physical_viewport_size else {
+    for (entity, camera, ssao_settings, resolution_override) in &views {
+        // Its own pictures at the size the main pass is drawn
+        // at (see the node): the shaders read them by a place from 0 to 1
+        // over the whole picture, which must then be the main pass's.
+        let Some(physical_viewport_size) = resolution_override
+            .map(|size| size.0)
+            .or(camera.physical_viewport_size)
+        else {
             continue;
         };
         let size = physical_viewport_size.to_extents();
