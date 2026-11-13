@@ -565,6 +565,7 @@ pub fn prepare_meshlet_per_frame_resources(
                 buffer.set_label(Some("meshlet_view_instance_visibility"));
                 buffer
             });
+        let mut hidden = 0;
         for (instance_index, (_, layers, not_shadow_caster)) in
             instance_manager.instances.iter().enumerate()
         {
@@ -582,7 +583,17 @@ pub fn prepare_meshlet_per_frame_resources(
                     vec.extend(iter::repeat_n(0, index - vec.len() + 1));
                 }
                 vec[index] |= 1 << bit;
+                hidden += 1;
             }
+        }
+        // A view that sees no meshlet instance (a camera on another render
+        // layer, the shadow view of a light nothing casts into) has no
+        // visibility buffer to make: the passes go by these components.
+        if hidden == instance_manager.instances.len() {
+            commands
+                .entity(view_entity)
+                .remove::<(MeshletViewResources, MeshletViewBindGroups)>();
+            continue;
         }
         instance_visibility.write_buffer(&render_device, &render_queue);
         let instance_visibility = instance_visibility.buffer().unwrap().clone();
