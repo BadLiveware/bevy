@@ -3,6 +3,7 @@ use super::{
     resource_manager::{MeshletViewBindGroups, MeshletViewResources, ResourceManager},
 };
 use crate::{LightEntity, ShadowView};
+use bevy_camera::{MainPassResolutionOverride, Viewport};
 use bevy_color::LinearRgba;
 use bevy_core_pipeline::prepass::PreviousViewUniformOffset;
 use bevy_ecs::prelude::*;
@@ -27,6 +28,7 @@ pub fn meshlet_visibility_buffer_raster(
         &PreviousViewUniformOffset,
         &MeshletViewBindGroups,
         &MeshletViewResources,
+        Option<&MainPassResolutionOverride>,
     )>,
     view_light_query: Query<(
         &ShadowView,
@@ -46,7 +48,13 @@ pub fn meshlet_visibility_buffer_raster(
         previous_view_offset,
         meshlet_view_bind_groups,
         meshlet_view_resources,
+        resolution_override,
     ) = view.into_inner();
+
+    // Where the main pass draws: smaller than the camera's viewport when an
+    // upscaler has it render below the output size.
+    let main_pass_viewport =
+        Viewport::from_viewport_and_override(camera.viewport.as_ref(), resolution_override);
 
     let Some((
         clear_visibility_buffer_pipeline,
@@ -120,7 +128,7 @@ pub fn meshlet_visibility_buffer_raster(
         visibility_buffer_software_raster_pipeline,
         visibility_buffer_hardware_raster_pipeline,
         fill_counts_pipeline,
-        Some(camera),
+        main_pass_viewport.as_ref(),
         meshlet_view_resources.rightmost_slot,
     );
     ctx.command_encoder().pop_debug_group();
@@ -160,7 +168,7 @@ pub fn meshlet_visibility_buffer_raster(
         visibility_buffer_software_raster_pipeline,
         visibility_buffer_hardware_raster_pipeline,
         fill_counts_pipeline,
-        Some(camera),
+        main_pass_viewport.as_ref(),
         meshlet_view_resources.rightmost_slot,
     );
     ctx.command_encoder().pop_debug_group();
@@ -170,14 +178,14 @@ pub fn meshlet_visibility_buffer_raster(
         view_depth.get_attachment(StoreOp::Store),
         meshlet_view_bind_groups,
         resolve_depth_pipeline,
-        camera,
+        main_pass_viewport.as_ref(),
     );
     resolve_material_depth(
         &mut ctx,
         meshlet_view_resources,
         meshlet_view_bind_groups,
         resolve_material_depth_pipeline,
-        camera,
+        main_pass_viewport.as_ref(),
     );
     meshlet_view_resources
         .depth_pyramid
@@ -295,7 +303,7 @@ pub fn meshlet_visibility_buffer_raster(
             shadow_view.depth_attachment.get_attachment(StoreOp::Store),
             meshlet_view_bind_groups,
             resolve_depth_shadow_view_pipeline,
-            camera,
+            camera.viewport.as_ref(),
         );
         meshlet_view_resources
             .depth_pyramid
@@ -537,7 +545,7 @@ fn raster_pass(
     visibility_buffer_software_raster_pipeline: &ComputePipeline,
     visibility_buffer_hardware_raster_pipeline: &RenderPipeline,
     fill_counts_pipeline: &ComputePipeline,
-    camera: Option<&ExtractedCamera>,
+    viewport: Option<&Viewport>,
     raster_cluster_rightmost_slot: u32,
 ) {
     let mut software_pass = ctx
@@ -579,7 +587,7 @@ fn raster_pass(
         occlusion_query_set: None,
         multiview_mask: None,
     });
-    if let Some(viewport) = camera.and_then(|camera| camera.viewport.as_ref()) {
+    if let Some(viewport) = viewport {
         hardware_pass.set_camera_viewport(viewport);
     }
     hardware_pass.set_render_pipeline(visibility_buffer_hardware_raster_pipeline);
@@ -608,7 +616,7 @@ fn resolve_depth(
     depth_stencil_attachment: RenderPassDepthStencilAttachment,
     meshlet_view_bind_groups: &MeshletViewBindGroups,
     resolve_depth_pipeline: &RenderPipeline,
-    camera: &ExtractedCamera,
+    viewport: Option<&Viewport>,
 ) {
     let mut resolve_pass = ctx.begin_tracked_render_pass(RenderPassDescriptor {
         label: Some("resolve_depth"),
@@ -618,7 +626,7 @@ fn resolve_depth(
         occlusion_query_set: None,
         multiview_mask: None,
     });
-    if let Some(viewport) = &camera.viewport {
+    if let Some(viewport) = viewport {
         resolve_pass.set_camera_viewport(viewport);
     }
     resolve_pass.set_render_pipeline(resolve_depth_pipeline);
@@ -631,7 +639,7 @@ fn resolve_material_depth(
     meshlet_view_resources: &MeshletViewResources,
     meshlet_view_bind_groups: &MeshletViewBindGroups,
     resolve_material_depth_pipeline: &RenderPipeline,
-    camera: &ExtractedCamera,
+    viewport: Option<&Viewport>,
 ) {
     if let (Some(material_depth), Some(resolve_material_depth_bind_group)) = (
         meshlet_view_resources.material_depth.as_ref(),
@@ -652,7 +660,7 @@ fn resolve_material_depth(
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        if let Some(viewport) = &camera.viewport {
+        if let Some(viewport) = viewport {
             resolve_pass.set_camera_viewport(viewport);
         }
         resolve_pass.set_render_pipeline(resolve_material_depth_pipeline);
