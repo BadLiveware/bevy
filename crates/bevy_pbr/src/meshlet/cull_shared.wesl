@@ -143,8 +143,12 @@ fn sample_hzb_row(sx: vec4<u32>, sy: u32, mip: i32) -> f32 {
 
 fn occlusion_cull_screen_aabb(aabb: ScreenAabb, screen: vec2<f32>) -> bool {
     let hzb_size = vec2<f32>(textureDimensions(depth_pyramid).xy);
-    let aabb_min = aabb.min.xy * hzb_size;
-    let aabb_max = aabb.max.xy * hzb_size;
+    // The pyramid is of the whole viewport, and the depth in it is within
+    // the main pass's part of that.
+    let main_pass_scale = view.main_pass_viewport.zw / view.viewport.zw;
+    let main_pass_offset = (view.main_pass_viewport.xy - view.viewport.xy) / view.viewport.zw;
+    let aabb_min = (aabb.min.xy * main_pass_scale + main_pass_offset) * hzb_size;
+    let aabb_max = (aabb.max.xy * main_pass_scale + main_pass_offset) * hzb_size;
 
     let min_texel = vec2<u32>(max(aabb_min, vec2<f32>(0.0)));
     let max_texel = vec2<u32>(min(aabb_max, hzb_size - 1.0));
