@@ -2,7 +2,7 @@ use super::{
     pipelines::MeshletPipelines,
     resource_manager::{MeshletViewBindGroups, MeshletViewResources, ResourceManager},
 };
-use crate::{LightEntity, ShadowView};
+use crate::{KeptShadowCascades, LightEntity, ShadowView};
 use bevy_camera::{MainPassResolutionOverride, Viewport};
 use bevy_color::LinearRgba;
 use bevy_core_pipeline::prepass::PreviousViewUniformOffset;
@@ -39,6 +39,7 @@ pub fn meshlet_visibility_buffer_raster(
         &MeshletViewResources,
     )>,
     resource_manager: Res<ResourceManager>,
+    kept_cascades: Option<Res<KeptShadowCascades>>,
     mut ctx: RenderContext,
 ) {
     let (
@@ -209,6 +210,16 @@ pub fn meshlet_visibility_buffer_raster(
         meshlet_view_resources,
     ) in view_light_query.iter()
     {
+        // A kept cascade is not drawn (see `KeptShadowCascades`): what the
+        // meshlets wrote into its shadow map when it was last drawn stays.
+        if let LightEntity::Directional { cascade_index, .. } = light_type
+            && kept_cascades
+                .as_ref()
+                .is_some_and(|kept| kept.0.contains(&(*cascade_index as u32)))
+        {
+            continue;
+        }
+
         let shadow_visibility_buffer_hardware_raster_pipeline =
             if let LightEntity::Directional { .. } = light_type {
                 visibility_buffer_hardware_raster_shadow_view_unclipped_pipeline
