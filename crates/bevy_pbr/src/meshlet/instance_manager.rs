@@ -171,6 +171,18 @@ impl InstanceManager {
         self.material_ids_present_in_scene.contains(material_id)
     }
 
+    /// The materials used by the meshlet mesh instances extracted this frame.
+    pub fn materials_in_use(
+        &self,
+        render_material_instances: &RenderMaterialInstances,
+    ) -> HashSet<UntypedAssetId> {
+        self.instances
+            .iter()
+            .filter_map(|(instance, _, _)| render_material_instances.instances.get(instance))
+            .map(|material_instance| material_instance.asset_id)
+            .collect()
+    }
+
     pub fn reset(&mut self, entities: &Entities) {
         self.scene_instance_count = 0;
         self.max_bvh_depth = 0;
