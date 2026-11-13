@@ -16,7 +16,7 @@ import package::{
         mesh_view_bindings::view,
         mesh_functions::mesh_position_local_to_world,
         mesh_types::Mesh,
-        view_transformations::{position_world_to_clip, frag_coord_to_ndc},
+        view_transformations::{position_world_to_clip, uv_to_ndc},
     },
 };
 import bevy_render::maths::{affine3_to_square, mat2x4_f32_to_mat3x3_unpack};
@@ -121,7 +121,11 @@ fn resolve_vertex_output(frag_coord: vec4<f32>) -> VertexOutput {
     let world_position_1 = mesh_position_local_to_world(world_from_local, vec4(vertex_1.position, 1.0));
     let world_position_2 = mesh_position_local_to_world(world_from_local, vec4(vertex_2.position, 1.0));
 
-    let frag_coord_ndc = frag_coord_to_ndc(frag_coord).xy;
+    // Within the main pass's viewport, which is where this pixel was drawn
+    // (`frag_coord_to_ndc` goes by the whole viewport).
+    let frag_coord_ndc = uv_to_ndc(
+        (frag_coord.xy - view.main_pass_viewport.xy) / view.main_pass_viewport.zw
+    );
     let partial_derivatives = compute_partial_derivatives(
         array(world_position_0, world_position_1, world_position_2),
         frag_coord_ndc,
