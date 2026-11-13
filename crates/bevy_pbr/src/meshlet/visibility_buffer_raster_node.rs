@@ -248,7 +248,7 @@ pub fn meshlet_visibility_buffer_raster(
                 shadow_view.depth_attachment.get_attachment(StoreOp::Store),
                 meshlet_view_bind_groups,
                 resolve_depth_shadow_view_pipeline,
-                camera,
+                camera.viewport.as_ref(),
             );
             ctx.command_encoder().pop_debug_group();
             time_span_shadow.end(ctx.command_encoder());
