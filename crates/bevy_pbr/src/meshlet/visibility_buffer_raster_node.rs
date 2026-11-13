@@ -2,7 +2,7 @@ use super::{
     pipelines::MeshletPipelines,
     resource_manager::{MeshletViewBindGroups, MeshletViewResources, ResourceManager},
 };
-use crate::{KeptShadowCascades, LightEntity, ShadowView};
+use crate::{KeptShadowCascades, LightEntity, ShadowView, ViewLightEntities};
 use bevy_camera::{MainPassResolutionOverride, Viewport};
 use bevy_color::LinearRgba;
 use bevy_core_pipeline::prepass::PreviousViewUniformOffset;
@@ -29,6 +29,7 @@ pub fn meshlet_visibility_buffer_raster(
         &MeshletViewBindGroups,
         &MeshletViewResources,
         Option<&MainPassResolutionOverride>,
+        Option<&ViewLightEntities>,
     )>,
     view_light_query: Query<(
         &ShadowView,
@@ -50,6 +51,7 @@ pub fn meshlet_visibility_buffer_raster(
         meshlet_view_bind_groups,
         meshlet_view_resources,
         resolution_override,
+        view_lights,
     ) = view.into_inner();
 
     // Where the main pass draws: smaller than the camera's viewport when an
@@ -208,7 +210,10 @@ pub fn meshlet_visibility_buffer_raster(
         previous_view_offset,
         meshlet_view_bind_groups,
         meshlet_view_resources,
-    ) in view_light_query.iter()
+    ) in view_lights
+        .iter()
+        .flat_map(|view_lights| &view_lights.lights)
+        .filter_map(|shadow_view| view_light_query.get(*shadow_view).ok())
     {
         // A kept cascade is not drawn (see `KeptShadowCascades`): what the
         // meshlets wrote into its shadow map when it was last drawn stays.
