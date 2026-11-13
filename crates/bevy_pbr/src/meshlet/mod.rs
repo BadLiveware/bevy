@@ -199,8 +199,11 @@ impl Plugin for MeshletPlugin {
             .add_systems(
                 Core3d,
                 (
+                    // Before the ordinary prepass: the two write the view's
+                    // depth, and the first to ask for it clears it.
                     meshlet_visibility_buffer_raster
-                        .before(per_view_shadow_pass::<EARLY_SHADOW_PASS>),
+                        .before(per_view_shadow_pass::<EARLY_SHADOW_PASS>)
+                        .before(early_prepass),
                     // After the first of the ordinary prepasses, which is the
                     // one to clear the targets they share.
                     meshlet_prepass
