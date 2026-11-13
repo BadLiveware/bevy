@@ -19,7 +19,9 @@ fn resolve_depth(in: FullscreenVertexOutput) -> @builtin(frag_depth) f32 {
 
     if depth == 0u { discard; }
 
-    return bitcast<f32>(depth);
+    // (The software rasterizer does not clip: a shadow caster nearer a
+    // directional light than its view's near plane has a depth over one.)
+    return min(bitcast<f32>(depth), 1.0);
 }
 
 /// This pass writes out the material depth texture.
