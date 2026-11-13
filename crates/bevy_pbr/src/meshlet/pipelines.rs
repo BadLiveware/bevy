@@ -364,6 +364,13 @@ pub fn init_meshlet_pipelines(
                 ),
                 layout: vec![visibility_buffer_raster_shadow_view_layout],
                 immediate_size: 4,
+                // A directional light's casters may stand between the light
+                // and the near plane of its view: not clipped, their depth
+                // clamped to the plane.
+                primitive: PrimitiveState {
+                    unclipped_depth: true,
+                    ..default()
+                },
                 vertex: VertexState {
                     shader: visibility_buffer_hardware_raster.clone(),
                     shader_defs: vec!["MESHLET_VISIBILITY_BUFFER_RASTER_PASS".into()],
