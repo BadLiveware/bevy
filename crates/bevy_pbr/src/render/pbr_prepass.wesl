@@ -35,15 +35,17 @@ fn fragment(
 @if(MESHLET_MESH_MATERIAL_PASS)
     let is_front = true;
 
+@if(MESHLET_MESH_MATERIAL_PASS && BINDLESS)
+    let slot = in.material_bind_group_slot;
 @if(!MESHLET_MESH_MATERIAL_PASS && BINDLESS)
     let slot = mesh[in.instance_index].material_and_lightmap_bind_group_slot & 0xffffu;
-@if(!MESHLET_MESH_MATERIAL_PASS && BINDLESS)
+@if(BINDLESS)
     let flags = pbr_bindings::material_array[material_indices[slot].material].flags;
-@if(!MESHLET_MESH_MATERIAL_PASS && BINDLESS)
+@if(BINDLESS)
     let uv_transform = pbr_bindings::material_array[material_indices[slot].material].uv_transform;
-@if(!MESHLET_MESH_MATERIAL_PASS && !BINDLESS)
+@if(!BINDLESS)
     let flags = pbr_bindings::material.flags;
-@if(!MESHLET_MESH_MATERIAL_PASS && !BINDLESS)
+@if(!BINDLESS)
     let uv_transform = pbr_bindings::material.uv_transform;
 
     // If we're in the crossfade section of a visibility range, conditionally
