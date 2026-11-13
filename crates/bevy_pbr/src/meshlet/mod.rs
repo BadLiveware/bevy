@@ -50,10 +50,8 @@ use bevy_asset::{embedded_asset, AssetApp, AssetId, Handle};
 use bevy_camera::visibility::{self, Visibility, VisibilityClass};
 use bevy_core_pipeline::{
     core_3d::main_opaque_pass_3d,
-    prepass::{
-        node::{early_deferred_prepass, early_prepass},
-        DeferredPrepass, MotionVectorPrepass, NormalPrepass,
-    },
+    deferred::node::early_deferred_prepass,
+    prepass::{node::early_prepass, DeferredPrepass, MotionVectorPrepass, NormalPrepass},
     schedule::{Core3d, Core3dSystems},
 };
 use bevy_derive::{Deref, DerefMut};
