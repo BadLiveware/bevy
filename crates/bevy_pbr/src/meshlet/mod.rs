@@ -50,7 +50,10 @@ use bevy_asset::{embedded_asset, AssetApp, AssetId, Handle};
 use bevy_camera::visibility::{self, Visibility, VisibilityClass};
 use bevy_core_pipeline::{
     core_3d::main_opaque_pass_3d,
-    prepass::{DeferredPrepass, MotionVectorPrepass, NormalPrepass},
+    prepass::{
+        node::{early_deferred_prepass, early_prepass},
+        DeferredPrepass, MotionVectorPrepass, NormalPrepass,
+    },
     schedule::{Core3d, Core3dSystems},
 };
 use bevy_derive::{Deref, DerefMut};
@@ -200,11 +203,15 @@ impl Plugin for MeshletPlugin {
                 (
                     meshlet_visibility_buffer_raster
                         .before(per_view_shadow_pass::<EARLY_SHADOW_PASS>),
+                    // After the first of the ordinary prepasses, which is the
+                    // one to clear the targets they share.
                     meshlet_prepass
                         .after(per_view_shadow_pass::<EARLY_SHADOW_PASS>)
+                        .after(early_prepass)
                         .in_set(Core3dSystems::Prepass),
                     meshlet_deferred_gbuffer_prepass
                         .after(meshlet_prepass)
+                        .after(early_deferred_prepass)
                         .in_set(Core3dSystems::Prepass),
                     meshlet_main_opaque_pass
                         .before(main_opaque_pass_3d)
