@@ -50,6 +50,9 @@ pub struct ResourceManager {
     previous_depth_pyramids: EntityHashMap<TextureView>,
     /// The visibility buffers of shadow views, kept from frame to frame.
     still_shadow_views: EntityHashMap<StillShadowView>,
+    /// A depth pyramid of nothing: one texel at the far plane, which
+    /// occludes nothing.
+    empty_depth_pyramid: TextureView,
 
     // Bind group layouts
     pub clear_visibility_buffer_bind_group_layout: BindGroupLayoutDescriptor,
@@ -135,6 +138,23 @@ impl ResourceManager {
 
             previous_depth_pyramids: EntityHashMap::default(),
             still_shadow_views: EntityHashMap::default(),
+            // (A new texture is all zeros, which is the far plane.)
+            empty_depth_pyramid: render_device
+                .create_texture(&TextureDescriptor {
+                    label: Some("meshlet_empty_depth_pyramid"),
+                    size: Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::R32Float,
+                    usage: TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&TextureViewDescriptor::default()),
 
             // TODO: Buffer min sizes
             clear_visibility_buffer_bind_group_layout: BindGroupLayoutDescriptor::new(
@@ -806,7 +826,7 @@ pub fn prepare_meshlet_per_frame_resources(
         let previous_depth_pyramid =
             match resource_manager.previous_depth_pyramids.get(&view_entity) {
                 Some(texture_view) if !was_kept => texture_view.clone(),
-                Some(_) => resource_manager.depth_pyramid_dummy_texture.clone(),
+                Some(_) => resource_manager.empty_depth_pyramid.clone(),
                 None => depth_pyramid.all_mips.clone(),
             };
         resource_manager
