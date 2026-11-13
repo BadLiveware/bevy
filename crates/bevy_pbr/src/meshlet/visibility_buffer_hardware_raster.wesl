@@ -57,6 +57,10 @@ fn vertex(@builtin(instance_index) instance_index: u32, @builtin(vertex_index) v
 
 @fragment
 fn fragment(vertex_output: VertexOutput) {
+    // Beyond the far plane, where a view drawn unclipped still has
+    // fragments: nothing to draw. (As bits a negative depth is greater
+    // than any other, and would win the maximum below.)
+    if vertex_output.position.z < 0.0 { return; }
     let depth = bitcast<u32>(vertex_output.position.z);
     @if(MESHLET_VISIBILITY_BUFFER_RASTER_PASS_OUTPUT)
     let visibility = (u64(depth) << 32u) | u64(vertex_output.packed_ids);
