@@ -3,13 +3,9 @@ use super::{
     resource_manager::ResourceManager,
 };
 use crate::*;
-use bevy_camera::{Camera3d, Projection};
-use bevy_core_pipeline::{
-    prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
-    tonemapping::{DebandDither, Tonemapping},
-};
+use bevy_camera::Camera3d;
+use bevy_core_pipeline::prepass::{DeferredPrepass, MotionVectorPrepass, NormalPrepass};
 use bevy_derive::{Deref, DerefMut};
-use bevy_light::{EnvironmentMapLight, IrradianceVolume, ShadowFilteringMethod};
 use bevy_material::{
     key::{ErasedMaterialPipelineKey, ErasedMeshPipelineKey},
     OpaqueRendererMethod,
@@ -20,10 +16,9 @@ use bevy_mesh::{
     MeshVertexBufferLayouts,
 };
 use bevy_platform::collections::HashMap;
-use bevy_render::{camera::ExtractedCamera, erased_render_asset::ErasedRenderAssets};
+use bevy_render::erased_render_asset::ErasedRenderAssets;
 use bevy_render::{
-    camera::TemporalJitter, material_bind_groups::MaterialBindGroupAllocators, render_resource::*,
-    view::ExtractedView,
+    material_bind_groups::MaterialBindGroupAllocators, render_resource::*, view::ExtractedView,
 };
 use bevy_utils::default;
 use core::any::TypeId;
@@ -46,111 +41,17 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass(
     render_material_instances: Res<RenderMaterialInstances>,
     material_bind_group_allocators: Res<MaterialBindGroupAllocators>,
     mut mesh_vertex_buffer_layouts: ResMut<MeshVertexBufferLayouts>,
-    mut views: Query<
-        (
-            &mut MeshletViewMaterialsMainOpaquePass,
-            &ExtractedCamera,
-            &ExtractedView,
-            Option<&Tonemapping>,
-            Option<&DebandDither>,
-            Option<&ShadowFilteringMethod>,
-            (Has<ScreenSpaceAmbientOcclusion>, Has<DistanceFog>),
-            (
-                Has<NormalPrepass>,
-                Has<DepthPrepass>,
-                Has<MotionVectorPrepass>,
-                Has<DeferredPrepass>,
-            ),
-            Has<TemporalJitter>,
-            Option<&Projection>,
-            Has<RenderViewLightProbes<EnvironmentMapLight>>,
-            Has<RenderViewLightProbes<IrradianceVolume>>,
-        ),
-        With<Camera3d>,
-    >,
+    view_key_cache: Res<ViewKeyCache>,
+    mut views: Query<(&mut MeshletViewMaterialsMainOpaquePass, &ExtractedView), With<Camera3d>>,
 ) {
     let fake_vertex_buffer_layout = &fake_vertex_buffer_layout(&mut mesh_vertex_buffer_layouts);
 
-    for (
-        mut materials,
-        camera,
-        view,
-        tonemapping,
-        dither,
-        shadow_filter_method,
-        (ssao, distance_fog),
-        (normal_prepass, depth_prepass, motion_vector_prepass, deferred_prepass),
-        temporal_jitter,
-        projection,
-        has_environment_maps,
-        has_irradiance_volumes,
-    ) in &mut views
-    {
-        let mut view_key = MeshPipelineKey::from_msaa_samples(1)
-            | MeshPipelineKey::from_target_format(view.target_format);
-
-        if normal_prepass {
-            view_key |= MeshPipelineKey::NORMAL_PREPASS;
-        }
-        if depth_prepass {
-            view_key |= MeshPipelineKey::DEPTH_PREPASS;
-        }
-        if motion_vector_prepass {
-            view_key |= MeshPipelineKey::MOTION_VECTOR_PREPASS;
-        }
-        if deferred_prepass {
-            view_key |= MeshPipelineKey::DEFERRED_PREPASS;
-        }
-
-        if temporal_jitter {
-            view_key |= MeshPipelineKey::TEMPORAL_JITTER;
-        }
-
-        if has_environment_maps {
-            view_key |= MeshPipelineKey::ENVIRONMENT_MAP;
-        }
-
-        if has_irradiance_volumes {
-            view_key |= MeshPipelineKey::IRRADIANCE_VOLUME;
-        }
-
-        if let Some(projection) = projection {
-            view_key |= match projection {
-                Projection::Perspective(_) => MeshPipelineKey::VIEW_PROJECTION_PERSPECTIVE,
-                Projection::Orthographic(_) => MeshPipelineKey::VIEW_PROJECTION_ORTHOGRAPHIC,
-                Projection::Custom(_) => MeshPipelineKey::VIEW_PROJECTION_NONSTANDARD,
-            };
-        }
-
-        match shadow_filter_method.unwrap_or(&ShadowFilteringMethod::default()) {
-            ShadowFilteringMethod::Hardware2x2 => {
-                view_key |= MeshPipelineKey::SHADOW_FILTER_METHOD_HARDWARE_2X2;
-            }
-            ShadowFilteringMethod::Gaussian => {
-                view_key |= MeshPipelineKey::SHADOW_FILTER_METHOD_GAUSSIAN;
-            }
-            ShadowFilteringMethod::Temporal => {
-                view_key |= MeshPipelineKey::SHADOW_FILTER_METHOD_TEMPORAL;
-            }
-        }
-
-        if !camera.hdr
-            && let Some(tonemapping) = tonemapping
-            && tonemapping.is_enabled()
-        {
-            view_key |= MeshPipelineKey::TONEMAP_IN_SHADER;
-            view_key |= tonemapping_pipeline_key(*tonemapping);
-            if let Some(DebandDither::Enabled) = dither {
-                view_key |= MeshPipelineKey::DEBAND_DITHER;
-            }
-        }
-
-        if ssao {
-            view_key |= MeshPipelineKey::SCREEN_SPACE_AMBIENT_OCCLUSION;
-        }
-        if distance_fog {
-            view_key |= MeshPipelineKey::DISTANCE_FOG;
-        }
+    for (mut materials, view) in &mut views {
+        // The key the view's other meshes are specialized with: the view's
+        // bind group is laid out by it, so the meshlet pipelines must be too.
+        let Some(mut view_key) = view_key_cache.get(&view.retained_view_entity).copied() else {
+            continue;
+        };
 
         view_key |= MeshPipelineKey::from_primitive_topology_and_strip_index(
             PrimitiveTopology::TriangleList,
