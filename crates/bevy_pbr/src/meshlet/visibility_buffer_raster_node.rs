@@ -239,6 +239,22 @@ pub fn meshlet_visibility_buffer_raster(
         let time_span_shadow =
             diagnostics.time_span(ctx.command_encoder(), shadow_view.pass_name.clone());
 
+        // The view and the scene's instances are as they were when the
+        // view's visibility buffer was made: its depth goes into the shadow
+        // map as it stands.
+        if meshlet_view_resources.visibility_buffer_kept {
+            resolve_depth(
+                &mut ctx,
+                shadow_view.depth_attachment.get_attachment(StoreOp::Store),
+                meshlet_view_bind_groups,
+                resolve_depth_shadow_view_pipeline,
+                camera,
+            );
+            ctx.command_encoder().pop_debug_group();
+            time_span_shadow.end(ctx.command_encoder());
+            continue;
+        }
+
         clear_visibility_buffer_pass(
             &mut ctx,
             &meshlet_view_bind_groups.clear_visibility_buffer,

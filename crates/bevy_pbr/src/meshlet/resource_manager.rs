@@ -13,7 +13,7 @@ use bevy_ecs::{
     system::{Commands, Query, Res, ResMut},
 };
 use bevy_image::ToExtents;
-use bevy_math::{UVec2, Vec4Swizzles};
+use bevy_math::{Affine3A, Mat4, UVec2, Vec4Swizzles};
 use bevy_render::{
     render_resource::*,
     renderer::{RenderDevice, RenderQueue},
@@ -48,6 +48,8 @@ pub struct ResourceManager {
 
     // TODO
     previous_depth_pyramids: EntityHashMap<TextureView>,
+    /// The visibility buffers of shadow views, kept from frame to frame.
+    still_shadow_views: EntityHashMap<StillShadowView>,
 
     // Bind group layouts
     pub clear_visibility_buffer_bind_group_layout: BindGroupLayoutDescriptor,
@@ -132,6 +134,7 @@ impl ResourceManager {
             ),
 
             previous_depth_pyramids: EntityHashMap::default(),
+            still_shadow_views: EntityHashMap::default(),
 
             // TODO: Buffer min sizes
             clear_visibility_buffer_bind_group_layout: BindGroupLayoutDescriptor::new(
@@ -482,6 +485,24 @@ pub struct MeshletViewResources {
     pub material_depth: Option<CachedTexture>,
     pub view_size: UVec2,
     not_shadow_view: bool,
+    /// The view is a shadow view whose visibility buffer is kept from an
+    /// earlier frame: nothing is rasterized into it this frame.
+    pub visibility_buffer_kept: bool,
+}
+
+/// A shadow view's visibility buffer and what it was made of. Meshlet
+/// meshes do not deform, so while the view and the scene's instances are
+/// as they were, the buffer is as it would be made again: the culling, the
+/// raster and the depth pyramid are left out and its depth is resolved
+/// into the shadow map as it stands.
+struct StillShadowView {
+    visibility_buffer: CachedTexture,
+    size: UVec2,
+    clip_from_view: Mat4,
+    world_from_view: Affine3A,
+    scene_hash: u64,
+    /// Whether the buffer was kept in the frame before this one.
+    kept: bool,
 }
 
 #[derive(Component)]
@@ -613,23 +634,70 @@ pub fn prepare_meshlet_per_frame_resources(
             },
         );
 
-        let visibility_buffer = texture_cache.get(
-            &render_device,
-            TextureDescriptor {
-                label: Some("meshlet_visibility_buffer"),
-                size: view.viewport.zw().to_extents(),
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: if not_shadow_view {
-                    TextureFormat::R64Uint
-                } else {
-                    TextureFormat::R32Uint
-                },
-                usage: TextureUsages::STORAGE_ATOMIC | TextureUsages::STORAGE_BINDING,
-                view_formats: &[],
+        let visibility_buffer_descriptor = TextureDescriptor {
+            label: Some("meshlet_visibility_buffer"),
+            size: view.viewport.zw().to_extents(),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: if not_shadow_view {
+                TextureFormat::R64Uint
+            } else {
+                TextureFormat::R32Uint
             },
-        );
+            usage: TextureUsages::STORAGE_ATOMIC | TextureUsages::STORAGE_BINDING,
+            view_formats: &[],
+        };
+        // A shadow view's buffer is its own from frame to frame (the texture
+        // cache hands a texture to whoever asks next), and kept while the
+        // view and the scene are as they were when it was made. In the
+        // frame after it was kept, the depth pyramid of "the frame before"
+        // is of nothing, and no occlusion is taken from it.
+        let (visibility_buffer, visibility_buffer_kept, was_kept) = if not_shadow_view {
+            (
+                texture_cache.get(&render_device, visibility_buffer_descriptor),
+                false,
+                false,
+            )
+        } else {
+            let (clip_from_view, world_from_view, size) = (
+                view.clip_from_view,
+                view.world_from_view.affine(),
+                view.viewport.zw(),
+            );
+            let scene_hash = instance_manager.scene_hash;
+            match resource_manager.still_shadow_views.get_mut(&view_entity) {
+                Some(still) if still.size == size => {
+                    let kept = still.clip_from_view == clip_from_view
+                        && still.world_from_view == world_from_view
+                        && still.scene_hash == scene_hash;
+                    let was_kept = core::mem::replace(&mut still.kept, kept);
+                    still.clip_from_view = clip_from_view;
+                    still.world_from_view = world_from_view;
+                    still.scene_hash = scene_hash;
+                    (still.visibility_buffer.clone(), kept, was_kept)
+                }
+                _ => {
+                    let texture = render_device.create_texture(&visibility_buffer_descriptor);
+                    let visibility_buffer = CachedTexture {
+                        default_view: texture.create_view(&TextureViewDescriptor::default()),
+                        texture,
+                    };
+                    resource_manager.still_shadow_views.insert(
+                        view_entity,
+                        StillShadowView {
+                            visibility_buffer: visibility_buffer.clone(),
+                            size,
+                            clip_from_view,
+                            world_from_view,
+                            scene_hash,
+                            kept: false,
+                        },
+                    );
+                    (visibility_buffer, false, false)
+                }
+            }
+        };
 
         let second_pass_count = render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("meshlet_second_pass_count"),
@@ -748,7 +816,8 @@ pub fn prepare_meshlet_per_frame_resources(
 
         let previous_depth_pyramid =
             match resource_manager.previous_depth_pyramids.get(&view_entity) {
-                Some(texture_view) => texture_view.clone(),
+                Some(texture_view) if !was_kept => texture_view.clone(),
+                Some(_) => resource_manager.depth_pyramid_dummy_texture.clone(),
                 None => depth_pyramid.all_mips.clone(),
             };
         resource_manager
@@ -799,6 +868,7 @@ pub fn prepare_meshlet_per_frame_resources(
                 .then(|| texture_cache.get(&render_device, material_depth)),
             view_size: view.viewport.zw(),
             not_shadow_view,
+            visibility_buffer_kept,
         });
     }
 }

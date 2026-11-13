@@ -44,6 +44,11 @@ pub struct InstanceManager {
     pub instance_bvh_root_nodes: StorageBuffer<Vec<u32>>,
     /// Per-view per-instance visibility bit. Used for [`RenderLayers`] and [`NotShadowCaster`] support.
     pub view_instance_visibility: EntityHashMap<StorageBuffer<Vec<u32>>>,
+    /// A hash of what the scene's instances are and where they stand this
+    /// frame: the same from one frame to the next while none is added,
+    /// removed or moved. A shadow view that has not changed either keeps
+    /// its visibility buffer.
+    pub scene_hash: u64,
 
     /// Next material ID available.
     next_material_id: u32,
@@ -81,6 +86,7 @@ impl InstanceManager {
                 buffer
             },
             view_instance_visibility: EntityHashMap::default(),
+            scene_hash: 0,
 
             next_material_id: 0,
             material_id_lookup: HashMap::default(),
@@ -141,6 +147,20 @@ impl InstanceManager {
             None,
         );
 
+        // What the instance is and where it stands, into the scene's hash.
+        {
+            use core::hash::{BuildHasher, Hash, Hasher};
+            let mut hasher = bevy_platform::hash::FixedHasher::default().build_hasher();
+            self.scene_hash.hash(&mut hasher);
+            instance.hash(&mut hasher);
+            root_bvh_node.hash(&mut hasher);
+            not_shadow_caster.hash(&mut hasher);
+            for number in transform.to_cols_array() {
+                number.to_bits().hash(&mut hasher);
+            }
+            self.scene_hash = hasher.finish();
+        }
+
         // Append instance data
         self.instances.push((
             instance,
@@ -186,6 +206,7 @@ impl InstanceManager {
     pub fn reset(&mut self, entities: &Entities) {
         self.scene_instance_count = 0;
         self.max_bvh_depth = 0;
+        self.scene_hash = 0;
 
         self.instances.clear();
         self.instance_uniforms.get_mut().clear();
