@@ -73,13 +73,26 @@ fn rasterize_cluster(
     let index_ids = meshlet.start_index_id + (triangle_id * 3u) + vec3(0u, 1u, 2u);
     let vertex_ids = vec3(get_meshlet_vertex_id(index_ids[0]), get_meshlet_vertex_id(index_ids[1]), get_meshlet_vertex_id(index_ids[2]));
     let vertex_0 = viewport_vertices[vertex_ids[2]];
-    let vertex_1 = viewport_vertices[vertex_ids[1]];
-    let vertex_2 = viewport_vertices[vertex_ids[0]];
+    var vertex_1 = viewport_vertices[vertex_ids[1]];
+    var vertex_2 = viewport_vertices[vertex_ids[0]];
     let packed_ids = (cluster_id << 7u) | triangle_id;
 
-    // Backface culling
-    let triangle_double_area = edge_function(vertex_0.xy, vertex_1.xy, vertex_2.xy);
+    // Backface culling, in the view of a camera. A shadow view draws both
+    // sides, as the hardware rasterizer does (its pipelines cull nothing)
+    // and as a sheet with one side must to cast a shadow: a triangle turned
+    // away is drawn the other way round.
+    var triangle_double_area = edge_function(vertex_0.xy, vertex_1.xy, vertex_2.xy);
+@if(MESHLET_VISIBILITY_BUFFER_RASTER_PASS_OUTPUT)
     if triangle_double_area <= 0.0 { return; }
+@if(!MESHLET_VISIBILITY_BUFFER_RASTER_PASS_OUTPUT) {
+    if triangle_double_area == 0.0 { return; }
+    if triangle_double_area < 0.0 {
+        let swapped = vertex_1;
+        vertex_1 = vertex_2;
+        vertex_2 = swapped;
+        triangle_double_area = -triangle_double_area;
+    }
+}
 
     // Setup triangle gradients
     let w_x = vec3(vertex_1.y - vertex_2.y, vertex_2.y - vertex_0.y, vertex_0.y - vertex_1.y);
