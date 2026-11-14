@@ -364,9 +364,12 @@ fn fake_vertex_buffer_layout(layouts: &mut MeshVertexBufferLayouts) -> MeshVerte
             Mesh::ATTRIBUTE_NORMAL.id,
             Mesh::ATTRIBUTE_UV_0.id,
             Mesh::ATTRIBUTE_TANGENT.id,
+            // (Every meshlet mesh has a vertex color, white where its source had none: the
+            // material shaders are specialized to read it.)
+            Mesh::ATTRIBUTE_COLOR.id,
         ],
         VertexBufferLayout {
-            array_stride: 48,
+            array_stride: 64,
             step_mode: VertexStepMode::Vertex,
             attributes: vec![
                 VertexAttribute {
@@ -388,6 +391,11 @@ fn fake_vertex_buffer_layout(layouts: &mut MeshVertexBufferLayouts) -> MeshVerte
                     format: Mesh::ATTRIBUTE_TANGENT.format,
                     offset: 32,
                     shader_location: 3,
+                },
+                VertexAttribute {
+                    format: Mesh::ATTRIBUTE_COLOR.format,
+                    offset: 48,
+                    shader_location: 4,
                 },
             ],
         },

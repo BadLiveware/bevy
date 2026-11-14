@@ -257,6 +257,7 @@ fn get_meshlet_vertex_position(meshlet: ptr<function, Meshlet>, vertex_id: u32) 
 @group(2) @binding(5) var<storage, read> meshlet_vertex_normals: array<u32>; // Many per meshlet
 @group(2) @binding(6) var<storage, read> meshlet_vertex_uvs: array<vec2<f32>>; // Many per meshlet
 @group(2) @binding(7) var<storage, read> meshlet_instance_uniforms: array<Mesh>; // Per entity instance
+@group(2) @binding(8) var<storage, read> meshlet_vertex_colors: array<u32>; // Many per meshlet
 }
 
 // TODO: Load only twice, instead of 3x in cases where you load 3 indices per thread?
@@ -311,4 +312,9 @@ fn get_meshlet_vertex_normal(meshlet: ptr<function, Meshlet>, vertex_id: u32) ->
 @if(MESHLET_MESH_MATERIAL_PASS)
 fn get_meshlet_vertex_uv(meshlet: ptr<function, Meshlet>, vertex_id: u32) -> vec2<f32> {
     return meshlet_vertex_uvs[(*meshlet).start_vertex_attribute_id + vertex_id];
+}
+
+@if(MESHLET_MESH_MATERIAL_PASS)
+fn get_meshlet_vertex_color(meshlet: ptr<function, Meshlet>, vertex_id: u32) -> vec4<f32> {
+    return unpack4x8unorm(meshlet_vertex_colors[(*meshlet).start_vertex_attribute_id + vertex_id]);
 }

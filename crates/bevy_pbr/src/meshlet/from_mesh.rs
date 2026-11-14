@@ -45,7 +45,7 @@ impl MeshletMesh {
     /// The input mesh must:
     /// 1. Use [`PrimitiveTopology::TriangleList`]
     /// 2. Use indices
-    /// 3. Have the exact following set of vertex attributes: `{POSITION, NORMAL, UV_0}` (tangents can be used in material shaders, but are calculated at runtime and are not stored in the mesh)
+    /// 3. Have the exact following set of vertex attributes: `{POSITION, NORMAL, UV_0}`, and optionally `COLOR` (tangents can be used in material shaders, but are calculated at runtime and are not stored in the mesh)
     ///
     /// # Vertex precision
     ///
@@ -76,6 +76,15 @@ impl MeshletMesh {
         let vertex_stride = mesh.get_vertex_size() as usize;
         let vertices = VertexDataAdapter::new(&vertex_buffer, vertex_stride, 0).unwrap();
         let vertex_normals = bytemuck::cast_slice(&vertex_buffer[12..16]);
+        // What the simplifier weighs beside position, read from each vertex's normal on: the
+        // normal, then the UV (not weighed), then the color where the mesh has one, weighed
+        // lightly, so that a simplified level does not smear a dark vertex over a bright face.
+        let has_colors = mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some();
+        let attribute_weights: &[f32] = if has_colors {
+            &[0.5, 0.5, 0.5, 0.0, 0.0, 0.25, 0.25, 0.25, 0.0]
+        } else {
+            &[0.5; 3]
+        };
 
         // Generate a position-only vertex buffer for determining triangle/meshlet connectivity
         let position_only_vertex_remap = generate_position_remap(&vertices);
@@ -136,6 +145,7 @@ impl MeshletMesh {
                     &meshlets,
                     &vertices,
                     vertex_normals,
+                    attribute_weights,
                     vertex_stride,
                     &vertex_locks,
                 ) else {
@@ -207,6 +217,7 @@ impl MeshletMesh {
         let mut vertex_positions = BitVec::<u32, Lsb0>::new();
         let mut vertex_normals = Vec::new();
         let mut vertex_uvs = Vec::new();
+        let mut vertex_colors = Vec::new();
         let mut bevy_meshlets = Vec::with_capacity(meshlets.len());
         for (i, meshlet) in meshlets.meshlets.iter().enumerate() {
             build_and_compress_per_meshlet_vertex_data(
@@ -217,6 +228,8 @@ impl MeshletMesh {
                 &mut vertex_positions,
                 &mut vertex_normals,
                 &mut vertex_uvs,
+                &mut vertex_colors,
+                has_colors,
                 &mut bevy_meshlets,
                 vertex_position_quantization_factor,
             );
@@ -227,6 +240,7 @@ impl MeshletMesh {
             vertex_positions: vertex_positions.into_vec().into(),
             vertex_normals: vertex_normals.into(),
             vertex_uvs: vertex_uvs.into(),
+            vertex_colors: vertex_colors.into(),
             indices: meshlets.triangles.into(),
             bvh: bvh.into(),
             meshlets: bevy_meshlets.into(),
@@ -253,13 +267,18 @@ fn validate_input_mesh(mesh: &Mesh) -> Result<Cow<'_, [u32]>, MeshToMeshletMeshC
         Mesh::ATTRIBUTE_NORMAL,
         Mesh::ATTRIBUTE_UV_0,
     ];
-    if mesh
-        .attributes()
-        .map(|(attribute, _)| (attribute.id, attribute.format))
-        .ne(required_attributes
+    // (The color is optional, and comes after the others in a mesh's vertices.)
+    let provided = || {
+        mesh.attributes()
+            .map(|(attribute, _)| (attribute.id, attribute.format))
+    };
+    let required = || {
+        required_attributes
             .iter()
-            .map(|attribute| (attribute.id, attribute.format)))
-    {
+            .map(|attribute| (attribute.id, attribute.format))
+    };
+    let color = [(Mesh::ATTRIBUTE_COLOR.id, Mesh::ATTRIBUTE_COLOR.format)];
+    if provided().ne(required()) && provided().ne(required().chain(color)) {
         return Err(
             MeshToMeshletMeshConversionError::WrongMeshVertexAttributes {
                 required: required_attributes,
@@ -528,6 +547,7 @@ fn simplify_meshlet_group(
     meshlets: &Meshlets,
     vertices: &VertexDataAdapter<'_>,
     vertex_normals: &[f32],
+    attribute_weights: &[f32],
     vertex_stride: usize,
     vertex_locks: &[bool],
 ) -> Option<(Vec<u32>, f32)> {
@@ -550,7 +570,7 @@ fn simplify_meshlet_group(
         &group_indices,
         vertices,
         vertex_normals,
-        &[0.5; 3],
+        attribute_weights,
         vertex_stride,
         vertex_locks,
         group_indices.len() / 2,
@@ -591,6 +611,8 @@ fn build_and_compress_per_meshlet_vertex_data(
     vertex_positions: &mut BitVec<u32, Lsb0>,
     vertex_normals: &mut Vec<u32>,
     vertex_uvs: &mut Vec<Vec2>,
+    vertex_colors: &mut Vec<u32>,
+    has_colors: bool,
     meshlets: &mut Vec<Meshlet>,
     vertex_position_quantization_factor: u8,
 ) {
@@ -615,6 +637,15 @@ fn build_and_compress_per_meshlet_vertex_data(
 
         // Copy uncompressed UV
         vertex_uvs.push(uv);
+
+        // Pack the color as 4x8unorm (white where the mesh has none)
+        vertex_colors.push(if has_colors {
+            let color: &[f32] = bytemuck::cast_slice(&vertex_data[32..48]);
+            let byte = |c: f32| (c.clamp(0.0, 1.0) * 255.0 + 0.5) as u32;
+            byte(color[0]) | byte(color[1]) << 8 | byte(color[2]) << 16 | byte(color[3]) << 24
+        } else {
+            u32::MAX
+        });
 
         // Compress normal
         vertex_normals.push(pack2x16snorm(octahedral_encode(normal)));

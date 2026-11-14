@@ -17,7 +17,7 @@ use thiserror::Error;
 const MESHLET_MESH_ASSET_MAGIC: u64 = 1717551717668;
 
 /// The current version of the [`MeshletMesh`] asset format.
-pub const MESHLET_MESH_ASSET_VERSION: u64 = 3;
+pub const MESHLET_MESH_ASSET_VERSION: u64 = 4;
 
 /// A mesh that has been pre-processed into multiple small clusters of triangles called meshlets.
 ///
@@ -45,6 +45,9 @@ pub struct MeshletMesh {
     pub(crate) vertex_normals: Arc<[u32]>,
     /// Uncompressed vertex texture coordinates for meshlet vertices.
     pub(crate) vertex_uvs: Arc<[Vec2]>,
+    /// Linear RGBA vertex colors for meshlet vertices, 4x8unorm packed. White where the source
+    /// mesh had no vertex colors.
+    pub(crate) vertex_colors: Arc<[u32]>,
     /// Triangle indices for meshlets.
     pub(crate) indices: Arc<[u8]>,
     /// The BVH8 used for culling and LOD selection of the meshlets. The root is at index 0.
@@ -181,6 +184,7 @@ impl AssetSaver for MeshletMeshSaver {
         write_slice(&asset.vertex_positions, &mut writer)?;
         write_slice(&asset.vertex_normals, &mut writer)?;
         write_slice(&asset.vertex_uvs, &mut writer)?;
+        write_slice(&asset.vertex_colors, &mut writer)?;
         write_slice(&asset.indices, &mut writer)?;
         write_slice(&asset.bvh, &mut writer)?;
         write_slice(&asset.meshlets, &mut writer)?;
@@ -230,6 +234,7 @@ impl AssetLoader for MeshletMeshLoader {
         let vertex_positions = read_slice(reader)?;
         let vertex_normals = read_slice(reader)?;
         let vertex_uvs = read_slice(reader)?;
+        let vertex_colors = read_slice(reader)?;
         let indices = read_slice(reader)?;
         let bvh = read_slice(reader)?;
         let meshlets = read_slice(reader)?;
@@ -239,6 +244,7 @@ impl AssetLoader for MeshletMeshLoader {
             vertex_positions,
             vertex_normals,
             vertex_uvs,
+            vertex_colors,
             indices,
             bvh,
             meshlets,
