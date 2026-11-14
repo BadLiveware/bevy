@@ -30,6 +30,9 @@ pub struct ResourceManager {
     visibility_buffer_raster_clusters: Buffer,
     /// Intermediate buffer of previous counts of clusters in rasterizer buckets
     pub visibility_buffer_raster_cluster_prev_counts: Buffer,
+    /// Whether the point and spot lights' shadow views were rasterized this frame: they
+    /// are no view's own, and are rasterized once, with the first view that has meshlets.
+    pub local_light_views_rasterized: core::sync::atomic::AtomicBool,
     /// Intermediate buffer of count of clusters to software rasterize
     software_raster_cluster_count: Buffer,
     /// BVH traversal queues
@@ -84,6 +87,7 @@ impl ResourceManager {
                 usage: BufferUsages::STORAGE,
                 mapped_at_creation: false,
             }),
+            local_light_views_rasterized: core::sync::atomic::AtomicBool::new(false),
             visibility_buffer_raster_cluster_prev_counts: render_device.create_buffer(
                 &BufferDescriptor {
                     label: Some("meshlet_visibility_buffer_raster_cluster_prev_counts"),
@@ -519,6 +523,10 @@ pub fn prepare_meshlet_per_frame_resources(
     render_device: Res<RenderDevice>,
     mut commands: Commands,
 ) {
+    resource_manager
+        .local_light_views_rasterized
+        .store(false, core::sync::atomic::Ordering::Relaxed);
+
     if instance_manager.scene_instance_count == 0 {
         return;
     }
