@@ -231,6 +231,10 @@ pub fn meshlet_visibility_buffer_raster(
             continue;
         }
 
+        if let Some(rasterized) = &meshlet_view_resources.rasterized {
+            rasterized.store(true, core::sync::atomic::Ordering::Relaxed);
+        }
+
         clear_visibility_buffer_pass(
             &mut ctx,
             &meshlet_view_bind_groups.clear_visibility_buffer,
