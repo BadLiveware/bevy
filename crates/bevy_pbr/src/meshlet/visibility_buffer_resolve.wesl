@@ -11,6 +11,7 @@ import package::{
         get_meshlet_vertex_position,
         get_meshlet_vertex_normal,
         get_meshlet_vertex_uv,
+        get_meshlet_vertex_color,
     },
     render::{
         mesh_view_bindings::view,
@@ -90,6 +91,7 @@ struct VertexOutput {
     ddx_uv: vec2<f32>,
     ddy_uv: vec2<f32>,
     world_tangent: vec4<f32>,
+    color: vec4<f32>,
     mesh_flags: u32,
     cluster_id: u32,
     material_bind_group_slot: u32,
@@ -149,6 +151,8 @@ fn resolve_vertex_output(frag_coord: vec4<f32>) -> VertexOutput {
 
     let world_tangent = calculate_world_tangent(world_normal, ddx_world_position, ddy_world_position, ddx_uv, ddy_uv);
 
+    let color = mat3x4(vertex_0.color, vertex_1.color, vertex_2.color) * partial_derivatives.barycentrics;
+
     var motion_vector: vec2<f32>;
 @if(PREPASS_FRAGMENT && MOTION_VECTOR_PREPASS) {
     let previous_world_from_local = affine3_to_square(instance_uniform.previous_world_from_local);
@@ -167,6 +171,7 @@ fn resolve_vertex_output(frag_coord: vec4<f32>) -> VertexOutput {
     out.ddx_uv = ddx_uv;
     out.ddy_uv = ddy_uv;
     out.world_tangent = world_tangent;
+    out.color = color;
     out.mesh_flags = instance_uniform.flags;
     out.cluster_id = instance_id ^ meshlet_id;
     out.material_bind_group_slot = instance_uniform.material_and_lightmap_bind_group_slot & 0xffffu;
@@ -180,6 +185,7 @@ struct MeshletVertex {
     position: vec3<f32>,
     normal: vec3<f32>,
     uv: vec2<f32>,
+    color: vec4<f32>,
 }
 
 @if(MESHLET_MESH_MATERIAL_PASS)
@@ -188,6 +194,7 @@ fn load_vertex(meshlet: ptr<function, Meshlet>, vertex_id: u32) -> MeshletVertex
         get_meshlet_vertex_position(meshlet, vertex_id),
         get_meshlet_vertex_normal(meshlet, vertex_id),
         get_meshlet_vertex_uv(meshlet, vertex_id),
+        get_meshlet_vertex_color(meshlet, vertex_id),
     );
 }
 
