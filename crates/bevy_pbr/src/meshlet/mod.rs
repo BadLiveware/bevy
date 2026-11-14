@@ -76,6 +76,23 @@ use bevy_transform::components::Transform;
 use derive_more::From;
 use tracing::error;
 
+/// Switches for finding a fault in the meshlet passes: each turns one
+/// thing the renderer does to save work off, so that what it would draw
+/// without it can be seen and counted. All off by default.
+#[derive(
+    bevy_ecs::resource::Resource,
+    Clone,
+    Default,
+    bevy_render::extract_resource::ExtractResource,
+)]
+#[extract_app(RenderApp)]
+pub struct MeshletDebug {
+    /// Rasterize every shadow view every frame it is drawn in, also one
+    /// whose view and scene are unchanged and whose visibility buffer
+    /// would be kept.
+    pub rasterize_still_shadow_views: bool,
+}
+
 /// Provides a plugin for rendering large amounts of high-poly 3d meshes using an efficient GPU-driven method. See also [`MeshletMesh`].
 ///
 /// Rendering dense scenes made of high-poly meshes with thousands or millions of triangles is extremely expensive in Bevy's standard renderer.
@@ -153,7 +170,11 @@ impl Plugin for MeshletPlugin {
         embedded_asset!(app, "fill_counts.wesl");
 
         app.init_asset::<MeshletMesh>()
-            .register_asset_loader(MeshletMeshLoader);
+            .register_asset_loader(MeshletMeshLoader)
+            .init_resource::<MeshletDebug>()
+            .add_plugins(
+                bevy_render::extract_resource::ExtractResourcePlugin::<MeshletDebug>::default(),
+            );
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;

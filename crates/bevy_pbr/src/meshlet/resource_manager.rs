@@ -568,6 +568,7 @@ pub fn prepare_meshlet_per_frame_resources(
     mut texture_cache: ResMut<TextureCache>,
     render_queue: Res<RenderQueue>,
     render_device: Res<RenderDevice>,
+    debug: Option<Res<super::MeshletDebug>>,
     mut commands: Commands,
 ) {
     if instance_manager.scene_instance_count == 0 {
@@ -709,7 +710,10 @@ pub fn prepare_meshlet_per_frame_resources(
                         && still.scene_hash == scene_hash;
                     let rasterized = still.rasterized.swap(false, Ordering::Relaxed);
                     still.valid = same && (still.valid || rasterized);
-                    let kept = still.valid;
+                    let kept = still.valid
+                        && !debug
+                            .as_ref()
+                            .is_some_and(|debug| debug.rasterize_still_shadow_views);
                     let was_kept = core::mem::replace(&mut still.kept, kept);
                     still.clip_from_view = clip_from_view;
                     still.world_from_view = world_from_view;
