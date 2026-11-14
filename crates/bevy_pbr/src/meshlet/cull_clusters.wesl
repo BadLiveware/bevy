@@ -63,7 +63,8 @@ fn cull_clusters(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
     // Check how big the cluster is in screen space
     let world_from_local = affine3_to_square(meshlet_instance_uniforms[instance_id].world_from_local);
     let clip_from_local  = view.clip_from_world * world_from_local;
-    let projection = view.clip_from_world;
+    // (The view's own projection: the near plane is read from it below.)
+    let projection = view.clip_from_view;
     var near: f32;
     if projection[3][3] == 1.0 {
         near = projection[3][2] / projection[2][2];

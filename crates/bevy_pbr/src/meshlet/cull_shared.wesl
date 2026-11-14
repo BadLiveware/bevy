@@ -169,9 +169,9 @@ fn occlusion_cull_screen_aabb(aabb: ScreenAabb, screen: vec2<f32>) -> bool {
 
 fn occlusion_cull_projection() -> mat4x4<f32> {
     @if(MESHLET_FIRST_CULLING_PASS)
-    return previous_view.clip_from_world;
+    return previous_view.clip_from_view;
     @else
-    return view.clip_from_world;
+    return view.clip_from_view;
 }
 
 fn occlusion_cull_clip_from_local(instance_id: u32) -> mat4x4<f32> {
