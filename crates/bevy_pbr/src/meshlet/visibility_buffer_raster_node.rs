@@ -203,6 +203,17 @@ pub fn meshlet_visibility_buffer_raster(
     ctx.command_encoder().pop_debug_group();
     time_span.end(ctx.command_encoder());
 
+    // A point or spot light's shadow views are the light's and not a view's: they are in no
+    // view's list, and are rasterized with the first view of the frame that comes here.
+    let local_light_views = (!resource_manager
+        .local_light_views_rasterized
+        .swap(true, core::sync::atomic::Ordering::Relaxed))
+    .then(|| {
+        view_light_query
+            .iter()
+            .filter(|(_, light_type, ..)| !matches!(light_type, LightEntity::Directional { .. }))
+    });
+
     for (
         shadow_view,
         light_type,
@@ -214,6 +225,7 @@ pub fn meshlet_visibility_buffer_raster(
         .iter()
         .flat_map(|view_lights| &view_lights.lights)
         .filter_map(|shadow_view| view_light_query.get(*shadow_view).ok())
+        .chain(local_light_views.into_iter().flatten())
     {
         // A kept cascade is not drawn (see `KeptShadowCascades`): what the
         // meshlets wrote into its shadow map when it was last drawn stays.
