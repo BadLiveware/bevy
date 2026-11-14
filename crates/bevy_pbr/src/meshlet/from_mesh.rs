@@ -638,11 +638,14 @@ fn build_and_compress_per_meshlet_vertex_data(
         // Copy uncompressed UV
         vertex_uvs.push(uv);
 
-        // Pack the color as 4x8unorm (white where the mesh has none)
+        // Pack the color as 4x8unorm (white where the mesh has none). Red, green and blue are
+        // stored as their square roots: a vertex color is linear, and a dark one (baked
+        // occlusion deep in a vault) is under one part in 255, which would be stored as black.
         vertex_colors.push(if has_colors {
             let color: &[f32] = bytemuck::cast_slice(&vertex_data[32..48]);
             let byte = |c: f32| (c.clamp(0.0, 1.0) * 255.0 + 0.5) as u32;
-            byte(color[0]) | byte(color[1]) << 8 | byte(color[2]) << 16 | byte(color[3]) << 24
+            let root = |c: f32| byte(c.clamp(0.0, 1.0).sqrt());
+            root(color[0]) | root(color[1]) << 8 | root(color[2]) << 16 | byte(color[3]) << 24
         } else {
             u32::MAX
         });

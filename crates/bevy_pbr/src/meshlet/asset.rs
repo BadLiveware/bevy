@@ -17,7 +17,7 @@ use thiserror::Error;
 const MESHLET_MESH_ASSET_MAGIC: u64 = 1717551717668;
 
 /// The current version of the [`MeshletMesh`] asset format.
-pub const MESHLET_MESH_ASSET_VERSION: u64 = 4;
+pub const MESHLET_MESH_ASSET_VERSION: u64 = 5;
 
 /// A mesh that has been pre-processed into multiple small clusters of triangles called meshlets.
 ///
@@ -45,8 +45,8 @@ pub struct MeshletMesh {
     pub(crate) vertex_normals: Arc<[u32]>,
     /// Uncompressed vertex texture coordinates for meshlet vertices.
     pub(crate) vertex_uvs: Arc<[Vec2]>,
-    /// Linear RGBA vertex colors for meshlet vertices, 4x8unorm packed. White where the source
-    /// mesh had no vertex colors.
+    /// Linear RGBA vertex colors for meshlet vertices, 4x8unorm packed, red, green and blue as
+    /// their square roots. White where the source mesh had no vertex colors.
     pub(crate) vertex_colors: Arc<[u32]>,
     /// Triangle indices for meshlets.
     pub(crate) indices: Arc<[u8]>,
