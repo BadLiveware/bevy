@@ -316,5 +316,7 @@ fn get_meshlet_vertex_uv(meshlet: ptr<function, Meshlet>, vertex_id: u32) -> vec
 
 @if(MESHLET_MESH_MATERIAL_PASS)
 fn get_meshlet_vertex_color(meshlet: ptr<function, Meshlet>, vertex_id: u32) -> vec4<f32> {
-    return unpack4x8unorm(meshlet_vertex_colors[(*meshlet).start_vertex_attribute_id + vertex_id]);
+    // (Red, green and blue are stored as their square roots: see `from_mesh.rs`.)
+    let stored = unpack4x8unorm(meshlet_vertex_colors[(*meshlet).start_vertex_attribute_id + vertex_id]);
+    return vec4(stored.rgb * stored.rgb, stored.a);
 }
