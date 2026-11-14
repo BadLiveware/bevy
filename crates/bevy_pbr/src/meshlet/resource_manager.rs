@@ -20,7 +20,9 @@ use bevy_render::{
     texture::{CachedTexture, TextureCache},
     view::{ExtractedView, ViewUniform, ViewUniforms},
 };
+use alloc::sync::Arc;
 use binding_types::*;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::iter;
 
 /// Manages per-view and per-cluster GPU resources for [`MeshletPlugin`](`super::MeshletPlugin`).
@@ -508,6 +510,8 @@ pub struct MeshletViewResources {
     /// The view is a shadow view whose visibility buffer is kept from an
     /// earlier frame: nothing is rasterized into it this frame.
     pub visibility_buffer_kept: bool,
+    /// For a shadow view: to be set when the view is rasterized.
+    pub rasterized: Option<Arc<AtomicBool>>,
 }
 
 /// A shadow view's visibility buffer and what it was made of. Meshlet
@@ -521,6 +525,12 @@ struct StillShadowView {
     clip_from_view: Mat4,
     world_from_view: Affine3A,
     scene_hash: u64,
+    /// Set by the raster node in a frame in which it rasterizes this view,
+    /// read and cleared when the view is next prepared.
+    rasterized: Arc<AtomicBool>,
+    /// The buffer holds the scene as it is, seen as the view is: it was
+    /// rasterized since either last changed.
+    valid: bool,
     /// Whether the buffer was kept in the frame before this one.
     kept: bool,
 }
@@ -688,9 +698,18 @@ pub fn prepare_meshlet_per_frame_resources(
             let scene_hash = instance_manager.scene_hash;
             match resource_manager.still_shadow_views.get_mut(&view_entity) {
                 Some(still) if still.size == size => {
-                    let kept = still.clip_from_view == clip_from_view
+                    // Kept when the view and the scene are as they were, and
+                    // the buffer was rasterized since they came to be so.
+                    // That the view was prepared is not that it was drawn:
+                    // the node draws nothing until its pipelines are
+                    // compiled, and skips a cascade that is not redrawn this
+                    // frame.
+                    let same = still.clip_from_view == clip_from_view
                         && still.world_from_view == world_from_view
                         && still.scene_hash == scene_hash;
+                    let rasterized = still.rasterized.swap(false, Ordering::Relaxed);
+                    still.valid = same && (still.valid || rasterized);
+                    let kept = still.valid;
                     let was_kept = core::mem::replace(&mut still.kept, kept);
                     still.clip_from_view = clip_from_view;
                     still.world_from_view = world_from_view;
@@ -711,6 +730,8 @@ pub fn prepare_meshlet_per_frame_resources(
                             clip_from_view,
                             world_from_view,
                             scene_hash,
+                            rasterized: Arc::new(AtomicBool::new(false)),
+                            valid: false,
                             kept: false,
                         },
                     );
@@ -889,6 +910,11 @@ pub fn prepare_meshlet_per_frame_resources(
             view_size: view.viewport.zw(),
             not_shadow_view,
             visibility_buffer_kept,
+            rasterized: resource_manager
+                .still_shadow_views
+                .get(&view_entity)
+                .filter(|_| !not_shadow_view)
+                .map(|still| still.rasterized.clone()),
         });
     }
 }
