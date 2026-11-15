@@ -160,15 +160,26 @@ impl MeshletMesh {
                 }
                 group.parent_error = group_error;
 
-                // Build new meshlets using the simplified group
-                let new_meshlets = compute_meshlets(
+                // Build new meshlets using the simplified group, a level above the coarsest of
+                // the meshlets they were made from
+                let (new_meshlets, mut new_cull_data) = compute_meshlets(
                     &simplified_group_indices,
                     &vertices,
                     &position_only_vertex_remap,
                     Some((group.lod_bounds, group.parent_error)),
                 );
+                let lod_level = group
+                    .meshlets
+                    .iter()
+                    .map(|&id| cull_data[id as usize].lod_level)
+                    .max()
+                    .unwrap_or(0)
+                    .saturating_add(1);
+                for cull_data in &mut new_cull_data {
+                    cull_data.lod_level = lod_level;
+                }
 
-                Ok((group, new_meshlets))
+                Ok((group, (new_meshlets, new_cull_data)))
             });
 
             let first_group = all_groups.len() as u32;
@@ -232,6 +243,7 @@ impl MeshletMesh {
                 has_colors,
                 &mut bevy_meshlets,
                 vertex_position_quantization_factor,
+                cull_data[i].lod_level,
             );
         }
         vertex_positions.set_uninitialized(false);
@@ -405,6 +417,7 @@ fn compute_meshlets(
                 ),
                 lod_group_sphere,
                 error,
+                lod_level: 0,
             });
         }
         merge_meshlets(&mut meshlets, meshlet);
@@ -615,6 +628,7 @@ fn build_and_compress_per_meshlet_vertex_data(
     has_colors: bool,
     meshlets: &mut Vec<Meshlet>,
     vertex_position_quantization_factor: u8,
+    lod_level: u16,
 ) {
     let start_vertex_position_bit = vertex_positions.len() as u32;
     let start_vertex_attribute_id = vertex_normals.len() as u32;
@@ -691,7 +705,7 @@ fn build_and_compress_per_meshlet_vertex_data(
         start_index_id: meshlet.triangle_offset,
         vertex_count_minus_one: (meshlet.vertex_count - 1) as u8,
         triangle_count: meshlet.triangle_count as u8,
-        padding: 0,
+        lod_level,
         bits_per_vertex_position_channel_x,
         bits_per_vertex_position_channel_y,
         bits_per_vertex_position_channel_z,
@@ -725,6 +739,8 @@ struct TempMeshletCullData {
     aabb: Aabb3d,
     lod_group_sphere: BoundingSphere,
     error: f32,
+    /// How many times the triangles of this meshlet were simplified (0: the source mesh's).
+    lod_level: u16,
 }
 
 #[derive(Clone)]

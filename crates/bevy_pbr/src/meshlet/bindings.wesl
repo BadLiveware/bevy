@@ -29,6 +29,10 @@ fn get_meshlet_triangle_count(meshlet: ptr<function, Meshlet>) -> u32 {
     return extractBits((*meshlet).packed_a, 8u, 8u);
 }
 
+fn get_meshlet_lod_level(meshlet: ptr<function, Meshlet>) -> u32 {
+    return extractBits((*meshlet).packed_a, 16u, 16u);
+}
+
 struct MeshletCullData {
     aabb: MeshletAabbErrorOffset,
     lod_group_sphere: vec4<f32>,
