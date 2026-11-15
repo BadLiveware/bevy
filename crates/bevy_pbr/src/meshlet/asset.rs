@@ -17,7 +17,7 @@ use thiserror::Error;
 const MESHLET_MESH_ASSET_MAGIC: u64 = 1717551717668;
 
 /// The current version of the [`MeshletMesh`] asset format.
-pub const MESHLET_MESH_ASSET_VERSION: u64 = 3;
+pub const MESHLET_MESH_ASSET_VERSION: u64 = 4;
 
 /// A mesh that has been pre-processed into multiple small clusters of triangles called meshlets.
 ///
@@ -90,8 +90,9 @@ pub struct Meshlet {
     pub vertex_count_minus_one: u8,
     /// The amount of triangles in this meshlet.
     pub triangle_count: u8,
-    /// Unused.
-    pub padding: u16,
+    /// How many times the triangles of this meshlet were simplified from the source mesh: 0 for
+    /// the source's own triangles, one more for each level of detail above them.
+    pub lod_level: u16,
     /// Number of bits used to store the X channel of vertex positions within this meshlet.
     pub bits_per_vertex_position_channel_x: u8,
     /// Number of bits used to store the Y channel of vertex positions within this meshlet.
