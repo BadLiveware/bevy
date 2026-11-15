@@ -16,6 +16,7 @@ use bevy_ecs::{prelude::*, query::Has};
 use bevy_render::{
     camera::ExtractedCamera,
     diagnostic::RecordDiagnostics,
+    material_bind_groups::MaterialBindGroupAllocators,
     render_resource::{
         LoadOp, Operations, PipelineCache, RenderPassDepthStencilAttachment, RenderPassDescriptor,
         StoreOp,
@@ -37,6 +38,7 @@ pub fn meshlet_main_opaque_pass(
         &MeshletViewResources,
     )>,
     instance_manager: Res<InstanceManager>,
+    material_bind_group_allocators: Res<MaterialBindGroupAllocators>,
     pipeline_cache: Res<PipelineCache>,
     mut ctx: RenderContext,
 ) {
@@ -100,6 +102,8 @@ pub fn meshlet_main_opaque_pass(
         if instance_manager.material_present_in_scene(material_id)
             && let Some(material_pipeline) =
                 pipeline_cache.get_render_pipeline(*material_pipeline_id)
+            && let Some(material_bind_group) =
+                material_bind_group.get(&material_bind_group_allocators)
         {
             let x = *material_id * 3;
             render_pass.set_render_pipeline(material_pipeline);
@@ -126,6 +130,7 @@ pub fn meshlet_prepass(
     )>,
     prepass_view_bind_group: Res<PrepassViewBindGroup>,
     instance_manager: Res<InstanceManager>,
+    material_bind_group_allocators: Res<MaterialBindGroupAllocators>,
     pipeline_cache: Res<PipelineCache>,
     mut ctx: RenderContext,
 ) {
@@ -217,6 +222,8 @@ pub fn meshlet_prepass(
         if instance_manager.material_present_in_scene(material_id)
             && let Some(material_pipeline) =
                 pipeline_cache.get_render_pipeline(*material_pipeline_id)
+            && let Some(material_bind_group) =
+                material_bind_group.get(&material_bind_group_allocators)
         {
             let x = *material_id * 3;
             render_pass.set_render_pipeline(material_pipeline);
@@ -243,6 +250,7 @@ pub fn meshlet_deferred_gbuffer_prepass(
     )>,
     prepass_view_bind_group: Res<PrepassViewBindGroup>,
     instance_manager: Res<InstanceManager>,
+    material_bind_group_allocators: Res<MaterialBindGroupAllocators>,
     pipeline_cache: Res<PipelineCache>,
     mut ctx: RenderContext,
 ) {
@@ -339,6 +347,8 @@ pub fn meshlet_deferred_gbuffer_prepass(
         if instance_manager.material_present_in_scene(material_id)
             && let Some(material_pipeline) =
                 pipeline_cache.get_render_pipeline(*material_pipeline_id)
+            && let Some(material_bind_group) =
+                material_bind_group.get(&material_bind_group_allocators)
         {
             let x = *material_id * 3;
             render_pass.set_render_pipeline(material_pipeline);
