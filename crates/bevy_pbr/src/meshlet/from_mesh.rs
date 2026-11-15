@@ -993,6 +993,13 @@ impl BvhBuilder {
     }
 }
 
+/// How far a child's bounding sphere may stick out of its parent's and still count as inside it:
+/// a ten-thousandth of a metre, or a few units in the last place of the numbers compared, whichever is
+/// more (spheres merged at a kilometre from the origin are rounded by more than the first).
+fn sphere_tolerance(center: Vec3A, radius: f32) -> f32 {
+    0.0001f32.max((center.abs().max_element() + radius) * f32::EPSILON * 8.0)
+}
+
 fn verify_bvh(
     out: &[BvhNode],
     cull_data: &[TempMeshletCullData],
@@ -1016,7 +1023,7 @@ fn verify_bvh(
                 let sphere_error = (sphere.center - child.lod_bounds[i].center).length()
                     - (sphere.radius - child.lod_bounds[i].radius);
                 assert!(
-                    sphere_error <= 0.0001,
+                    sphere_error <= sphere_tolerance(Vec3A::from(sphere.center), sphere.radius),
                     "BVH lod spheres are not monotonic ({sphere_error})"
                 );
             }
@@ -1030,7 +1037,7 @@ fn verify_bvh(
                     .length()
                     - (sphere.radius - meshlet.lod_group_sphere.radius());
                 assert!(
-                    sphere_error <= 0.0001,
+                    sphere_error <= sphere_tolerance(Vec3A::from(sphere.center), sphere.radius),
                     "meshlet lod spheres are not monotonic: ({sphere_error})"
                 );
                 reachable[mid] = true;
