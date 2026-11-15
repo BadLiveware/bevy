@@ -18,14 +18,39 @@ use bevy_mesh::{
 use bevy_platform::collections::HashMap;
 use bevy_render::erased_render_asset::ErasedRenderAssets;
 use bevy_render::{
-    material_bind_groups::MaterialBindGroupAllocators, render_resource::*, view::ExtractedView,
+    material_bind_groups::{MaterialBindGroupAllocators, MaterialBindGroupIndex},
+    render_resource::*,
+    view::ExtractedView,
 };
 use bevy_utils::default;
 use core::any::TypeId;
 
+/// Where a material's bind group is found when a meshlet material pass draws: its type's
+/// allocator and its slab there.
+///
+/// The bind group itself is taken when the pass is drawn and not when the passes are prepared, in
+/// [`RenderSystems::QueueMeshes`](`bevy_render::RenderSystems::QueueMeshes`): a material prepared
+/// anew in a frame has its bind group made later in that frame, in
+/// [`RenderSystems::PrepareBindGroups`](`bevy_render::RenderSystems::PrepareBindGroups`), and was
+/// left out of the frame's meshlet passes, drawing nothing where its meshes stand.
+#[derive(Clone, Copy, Debug)]
+pub struct MeshletMaterialBindGroup {
+    type_id: TypeId,
+    group: MaterialBindGroupIndex,
+}
+
+impl MeshletMaterialBindGroup {
+    /// The material's bind group, if it is ready.
+    pub fn get<'a>(&self, allocators: &'a MaterialBindGroupAllocators) -> Option<&'a BindGroup> {
+        allocators.get(&self.type_id)?.get(self.group)?.bind_group()
+    }
+}
+
 /// A list of `(Material ID, Pipeline, BindGroup)` for a view for use in [`meshlet_main_opaque_pass`](`super::meshlet_main_opaque_pass`).
 #[derive(Component, Deref, DerefMut, Default)]
-pub struct MeshletViewMaterialsMainOpaquePass(pub Vec<(u32, CachedRenderPipelineId, BindGroup)>);
+pub struct MeshletViewMaterialsMainOpaquePass(
+    pub Vec<(u32, CachedRenderPipelineId, MeshletMaterialBindGroup)>,
+);
 
 /// Prepare [`Material`] pipelines for [`MeshletMesh`](`super::MeshletMesh`) entities for use in [`meshlet_main_opaque_pass`](`super::meshlet_main_opaque_pass`),
 /// and register the material with [`InstanceManager`].
@@ -71,10 +96,9 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass(
             }
 
             let type_id = material_id.type_id();
-            let Some(material_bind_group_allocator) = material_bind_group_allocators.get(&type_id)
-            else {
+            if !material_bind_group_allocators.contains_key(&type_id) {
                 continue;
-            };
+            }
 
             let pipeline_id = if let Some(&id) = cache.get(&(view_key, type_id)) {
                 id
@@ -150,28 +174,26 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass(
             };
 
             let material_id = instance_manager.get_material_id(material_id);
-            let Some(material_bind_group) =
-                material_bind_group_allocator.get(material.binding.group)
-            else {
-                continue;
-            };
-            let Some(bind_group) = material_bind_group.bind_group() else {
-                continue;
+            let bind_group = MeshletMaterialBindGroup {
+                type_id,
+                group: material.binding.group,
             };
 
-            materials.push((material_id, pipeline_id, (*bind_group).clone()));
+            materials.push((material_id, pipeline_id, bind_group));
         }
     }
 }
 
 /// A list of `(Material ID, Pipeline, BindGroup)` for a view for use in [`meshlet_prepass`](`super::meshlet_prepass`).
 #[derive(Component, Deref, DerefMut, Default)]
-pub struct MeshletViewMaterialsPrepass(pub Vec<(u32, CachedRenderPipelineId, BindGroup)>);
+pub struct MeshletViewMaterialsPrepass(
+    pub Vec<(u32, CachedRenderPipelineId, MeshletMaterialBindGroup)>,
+);
 
 /// A list of `(Material ID, Pipeline, BindGroup)` for a view for use in [`meshlet_deferred_gbuffer_prepass`](`super::meshlet_deferred_gbuffer_prepass`).
 #[derive(Component, Deref, DerefMut, Default)]
 pub struct MeshletViewMaterialsDeferredGBufferPrepass(
-    pub Vec<(u32, CachedRenderPipelineId, BindGroup)>,
+    pub Vec<(u32, CachedRenderPipelineId, MeshletMaterialBindGroup)>,
 );
 
 /// Prepare [`Material`] pipelines for [`MeshletMesh`](`super::MeshletMesh`) entities for use in [`meshlet_prepass`](`super::meshlet_prepass`),
@@ -226,10 +248,9 @@ pub fn prepare_material_meshlet_meshes_prepass(
                 continue;
             };
             let type_id = material_id.type_id();
-            let Some(material_bind_group_allocator) = material_bind_group_allocators.get(&type_id)
-            else {
+            if !material_bind_group_allocators.contains_key(&type_id) {
                 continue;
-            };
+            }
 
             if material.properties.alpha_mode != AlphaMode::Opaque
                 || material.properties.reads_view_transmission_texture
@@ -337,16 +358,12 @@ pub fn prepare_material_meshlet_meshes_prepass(
             };
 
             let material_id = instance_manager.get_material_id(material_id);
-            let Some(material_bind_group) =
-                material_bind_group_allocator.get(material.binding.group)
-            else {
-                continue;
-            };
-            let Some(bind_group) = material_bind_group.bind_group() else {
-                continue;
+            let bind_group = MeshletMaterialBindGroup {
+                type_id,
+                group: material.binding.group,
             };
 
-            let item = (material_id, pipeline_id, (*bind_group).clone());
+            let item = (material_id, pipeline_id, bind_group);
             if view_key.contains(MeshPipelineKey::DEFERRED_PREPASS) {
                 deferred_materials.push(item);
             } else {
