@@ -94,6 +94,8 @@ struct VertexOutput {
     color: vec4<f32>,
     mesh_flags: u32,
     cluster_id: u32,
+    /// The triangle's index within its meshlet (0 to 127).
+    triangle_id: u32,
     material_bind_group_slot: u32,
     @if(PREPASS_FRAGMENT && MOTION_VECTOR_PREPASS)
     motion_vector: vec2<f32>,
@@ -178,6 +180,7 @@ fn resolve_vertex_output(frag_coord: vec4<f32>) -> VertexOutput {
     out.color = color;
     out.mesh_flags = instance_uniform.flags;
     out.cluster_id = instance_id ^ meshlet_id;
+    out.triangle_id = triangle_id;
     out.material_bind_group_slot = instance_uniform.material_and_lightmap_bind_group_slot & 0xffffu;
     @if(PREPASS_FRAGMENT && MOTION_VECTOR_PREPASS)
     out.motion_vector = motion_vector;
