@@ -202,6 +202,11 @@ impl RenderMultidrawableBin {
     fn is_empty(&self) -> bool {
         self.entity_to_binned_mesh_instance_index.is_empty()
     }
+
+    /// The main-world entities in this bin, in no particular order.
+    pub fn entities(&self) -> impl ExactSizeIterator<Item = &MainEntity> {
+        self.entity_to_binned_mesh_instance_index.keys()
+    }
 }
 
 /// The index of a mesh instance in the
@@ -763,6 +768,34 @@ where
     /// Returns the number of bins (i.e. draws) in this batch set.
     pub(crate) fn bin_count(&self) -> usize {
         self.bin_key_to_bin_index.len()
+    }
+
+    /// The bins of this batch set in the order of their indirect draw
+    /// commands, which is the order in which a multidraw of the set draws
+    /// them, each with its bin key.
+    ///
+    /// The `n`th bin yielded is drawn by the `n`th indirect draw command of
+    /// the batch set. This lets tools outside the renderer say what each
+    /// draw of a multidraw is (which mesh, which entities).
+    pub fn bins_in_draw_order(
+        &self,
+    ) -> impl Iterator<Item = (&BPI::BinKey, &RenderMultidrawableBin)> + '_ {
+        let mut keys: Vec<Option<&BPI::BinKey>> = vec![None; self.bins.len()];
+        for (key, bin_index) in &self.bin_key_to_bin_index {
+            keys[bin_index.0 as usize] = Some(key);
+        }
+        self.indirect_parameters_offset_to_bin_index
+            .iter()
+            .filter_map(move |bin_index| {
+                let index = bin_index.0 as usize;
+                Some((keys[index]?, self.bins.get(index)?.as_ref()?))
+            })
+    }
+
+    /// The total number of mesh instances in this batch set, over all its
+    /// bins.
+    pub fn instance_count(&self) -> u32 {
+        self.instance_count
     }
 }
 
