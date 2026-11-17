@@ -1,6 +1,6 @@
 use bevy_camera::{MainPassResolutionOverride, Viewport};
 use bevy_ecs::system::Res;
-use bevy_math::{UVec2, Vec3Swizzles};
+use bevy_math::UVec2;
 use bevy_render::{
     camera::ExtractedCamera,
     diagnostic::RecordDiagnostics,
@@ -140,7 +140,13 @@ pub fn atmosphere_luts(
         ],
     );
 
-    dispatch_2d(&mut luts_pass, settings.aerial_view_lut_size.xy());
+    // One workgroup a column of the LUT, its invocations the column's slices
+    // (aerial_view_lut.wesl).
+    luts_pass.dispatch_workgroups(
+        settings.aerial_view_lut_size.x,
+        settings.aerial_view_lut_size.y,
+        1,
+    );
     pass_span.end(&mut luts_pass);
 }
 
