@@ -49,7 +49,7 @@ use bevy_render::occlusion_culling::{
 use bevy_render::sync_world::{MainEntity, MainEntityHashMap, MainEntityHashSet, RenderEntity};
 use bevy_render::view::{
     RenderExtractedShadowMapVisibleEntities, RenderShadowLodOrigin, RenderShadowMapVisibleEntities,
-    RenderVisibleEntities, VisibilityExtractionSystemParam,
+    RenderVisibilityRanges, RenderVisibleEntities, VisibilityExtractionSystemParam,
 };
 use bevy_render::{
     batching::gpu_preprocessing::{GpuPreprocessingMode, GpuPreprocessingSupport},
@@ -2430,6 +2430,7 @@ pub(crate) struct SpecializeShadowsSystemParam<'w, 's> {
     render_material_instances: Res<'w, RenderMaterialInstances>,
     shadow_render_phases: Res<'w, ViewBinnedRenderPhases<Shadow>>,
     render_lightmaps: Res<'w, RenderLightmaps>,
+    render_visibility_ranges: Res<'w, RenderVisibilityRanges>,
     view_light_entities: Query<'w, 's, (&'static LightEntity, &'static ExtractedView)>,
     shadow_map_visible_entities_query: Query<'w, 's, &'static RenderShadowMapVisibleEntities>,
     light_key_cache: Res<'w, LightKeyCache>,
@@ -2455,6 +2456,7 @@ pub(crate) fn specialize_shadows(
             render_material_instances,
             shadow_render_phases,
             render_lightmaps,
+            render_visibility_ranges,
             view_light_entities,
             shadow_map_visible_entities_query,
             light_key_cache,
@@ -2582,6 +2584,16 @@ pub(crate) fn specialize_shadows(
                     mesh_key |= MeshPipelineKey::LIGHTMAPPED;
                 }
 
+                // A mesh fading between two levels of detail fades in the
+                // shadow map too, measured from the same position as in the
+                // view (`lod_view_world_position`), so that through the fade
+                // the two levels together cast what one casts on either side.
+                if render_visibility_ranges
+                    .entity_has_crossfading_visibility_ranges(*visible_entity)
+                {
+                    mesh_key |= MeshPipelineKey::VISIBILITY_RANGE_DITHER;
+                }
+
                 mesh_key |= match material.properties.alpha_mode {
                     AlphaMode::Mask(_)
                     | AlphaMode::Blend
@@ -2628,10 +2640,12 @@ pub(crate) fn specialize_shadows(
             .mesh_key
             .contains(MeshPipelineKey::UNCLIPPED_DEPTH_ORTHO)
             && !depth_clip_control_supported;
-        let is_depth_only_opaque = !item
-            .mesh_key
-            .intersects(MeshPipelineKey::MAY_DISCARD | MeshPipelineKey::PREPASS_READS_MATERIAL)
-            && !emulate_unclipped_depth;
+        // (The dither discards fragments, so it needs the fragment shader.)
+        let is_depth_only_opaque = !item.mesh_key.intersects(
+            MeshPipelineKey::MAY_DISCARD
+                | MeshPipelineKey::PREPASS_READS_MATERIAL
+                | MeshPipelineKey::VISIBILITY_RANGE_DITHER,
+        ) && !emulate_unclipped_depth;
         let draw_function = if is_depth_only_opaque {
             item.properties
                 .get_draw_function(ShadowsDepthOnlyDrawFunction)

@@ -6,6 +6,7 @@ import package::{
     render::{
         mesh_bindings::mesh,
         mesh_functions,
+        pbr_functions,
         skinning,
         morph,
         morph::{morph_position, morph_normal, morph_tangent},
@@ -175,6 +176,11 @@ fn vertex(vertex_no_morph: Vertex) -> VertexOutput {
 @if(PREPASS_FRAGMENT)
 @fragment
 fn fragment(in: VertexOutput) -> FragmentOutput {
+    // If we're in the crossfade section of a visibility range, conditionally
+    // discard the fragment according to the visibility pattern.
+@if(VISIBILITY_RANGE_DITHER)
+    pbr_functions::visibility_range_dither(in.position, in.visibility_range_dither);
+
     var out: FragmentOutput;
 
 @if(NORMAL_PREPASS)
@@ -207,4 +213,12 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
 }
 
     return out;
+}
+
+// A depth-only pass (a shadow map) of a mesh cross-fading between visibility
+// ranges: the fade dithered as the views dither it.
+@if(!PREPASS_FRAGMENT && VISIBILITY_RANGE_DITHER)
+@fragment
+fn fragment(in: VertexOutput) {
+    pbr_functions::visibility_range_dither(in.position, in.visibility_range_dither);
 }
