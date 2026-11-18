@@ -63,7 +63,6 @@ use bevy_render::{
 };
 use bevy_render::{mesh::allocator::MeshAllocator, sync_world::MainEntityHashMap};
 use bevy_shader::{Shader, ShaderDefVal};
-use bevy_utils::Parallel;
 use core::{
     any::{Any, TypeId},
     hash::Hash,
@@ -922,7 +921,6 @@ pub fn check_entities_needing_specialization<M>(
             With<MeshMaterial3d<M>>,
         ),
     >,
-    mut par_local: Local<Parallel<Vec<Entity>>>,
     mut entities_needing_specialization: ResMut<EntitiesNeedingSpecialization<M>>,
     mut removed_mesh_3d_components: RemovedComponents<Mesh3d>,
     mut removed_mesh_material_3d_components: RemovedComponents<MeshMaterial3d<M>>,
@@ -932,11 +930,13 @@ pub fn check_entities_needing_specialization<M>(
     entities_needing_specialization.changed.clear();
     entities_needing_specialization.removed.clear();
 
-    // Gather all entities that need their specializations regenerated.
-    needs_specialization
-        .par_iter()
-        .for_each(|entity| par_local.borrow_local_mut().push(entity));
-    par_local.drain_into(&mut entities_needing_specialization.changed);
+    // Gather all entities that need their specializations regenerated. The
+    // check is a few change ticks an entity: run in parallel, handing out the
+    // tasks and waiting for them cost more than the work, about the same for
+    // a material on one entity as for one on thousands.
+    entities_needing_specialization
+        .changed
+        .extend(needs_specialization.iter());
 
     // All entities that removed their `Mesh3d` or `MeshMaterial3d` components
     // need to have their specializations removed as well.
