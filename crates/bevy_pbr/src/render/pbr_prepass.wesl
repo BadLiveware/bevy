@@ -152,5 +152,9 @@ fn fragment(
 @else
 @fragment
 fn fragment(in: prepass_io::VertexOutput) {
+    // A depth-only pass (a shadow map) dithers a cross-fade as the views do.
+@if(VISIBILITY_RANGE_DITHER)
+    pbr_functions::visibility_range_dither(in.position, in.visibility_range_dither);
+
     pbr_prepass_functions::prepass_sample_color_and_alpha_discard(in);
 }

@@ -617,13 +617,15 @@ impl PrepassPipeline {
 
         // The fragment shader is only used when the normal prepass or motion vectors prepass
         // is enabled, the material uses alpha cutoff values and doesn't rely on the standard
-        // prepass shader, or we are emulating unclipped depth in the fragment shader.
+        // prepass shader, we are emulating unclipped depth in the fragment shader, or the
+        // mesh is cross-fading between visibility ranges (the dither discards fragments).
         let fragment_required = !targets.is_empty()
             || emulate_unclipped_depth
             || (mesh_key.contains(MeshPipelineKey::MAY_DISCARD)
                 && material_properties
                     .get_shader(PrepassFragmentShader)
-                    .is_some());
+                    .is_some())
+            || mesh_key.contains(MeshPipelineKey::VISIBILITY_RANGE_DITHER);
 
         let fragment = fragment_required.then(|| {
             // Use the fragment shader from the material
