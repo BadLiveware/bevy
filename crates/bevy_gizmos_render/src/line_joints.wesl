@@ -39,7 +39,7 @@ fn vertex_bevel(vertex: VertexInput) -> VertexOutput {
     );
     var position = positions[vertex.index];
 
-    let world_from_local = affine3_to_square(joints_gizmo.world_from_local);
+    let world_from_local = about_render_origin(affine3_to_square(joints_gizmo.world_from_local));
 
     var clip_a = view.clip_from_world * world_from_local * vec4(vertex.position_a, 1.);
     var clip_b = view.clip_from_world * world_from_local * vec4(vertex.position_b, 1.);
@@ -99,7 +99,7 @@ fn vertex_miter(vertex: VertexInput) -> VertexOutput {
     );
     var position = positions[vertex.index];
 
-    let world_from_local = affine3_to_square(joints_gizmo.world_from_local);
+    let world_from_local = about_render_origin(affine3_to_square(joints_gizmo.world_from_local));
 
     var clip_a = view.clip_from_world * world_from_local * vec4(vertex.position_a, 1.);
     var clip_b = view.clip_from_world * world_from_local * vec4(vertex.position_b, 1.);
@@ -150,7 +150,7 @@ fn vertex_miter(vertex: VertexInput) -> VertexOutput {
 
 @vertex
 fn vertex_round(vertex: VertexInput) -> VertexOutput {
-    let world_from_local = affine3_to_square(joints_gizmo.world_from_local);
+    let world_from_local = about_render_origin(affine3_to_square(joints_gizmo.world_from_local));
 
     var clip_a = view.clip_from_world * world_from_local * vec4(vertex.position_a, 1.);
     var clip_b = view.clip_from_world * world_from_local * vec4(vertex.position_b, 1.);
@@ -248,4 +248,10 @@ struct FragmentOutput {
 fn fragment(in: FragmentInput) -> FragmentOutput {
     // return FragmentOutput(vec4(1, 1, 1, 1));
     return FragmentOutput(in.color);
+}
+
+/// A gizmo's transform about the view's render origin (`RenderOrigin`): the
+/// view's positions are taken about it.
+fn about_render_origin(m: mat4x4<f32>) -> mat4x4<f32> {
+    return mat4x4<f32>(m[0], m[1], m[2], vec4(m[3].xyz - view.render_origin, m[3].w));
 }

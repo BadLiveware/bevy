@@ -55,7 +55,7 @@ use bevy_render::{
     batching::gpu_preprocessing::{GpuPreprocessingMode, GpuPreprocessingSupport},
     camera::SortedCameras,
     mesh::allocator::MeshAllocator,
-    view::{NoIndirectDrawing, RetainedViewEntity},
+    view::{NoIndirectDrawing, RenderOrigin, RetainedViewEntity, UsesRenderOrigin},
 };
 use bevy_render::{
     mesh::RenderMesh,
@@ -994,7 +994,10 @@ pub(crate) fn remove_point_and_spot_light_view_entities(
 #[derive(Component, Default, Deref, DerefMut)]
 pub struct PointAndSpotLightViewEntities(Vec<Entity>);
 
+/// A shadow view is drawn about the render origin (`RenderOrigin`), as the
+/// camera views whose shadows it gives are.
 #[derive(Component)]
+#[require(UsesRenderOrigin)]
 pub struct ShadowView {
     pub depth_attachment: DepthStencilViewAttachment,
     pub pass_name: String,
@@ -1115,9 +1118,10 @@ pub fn prepare_lights(
         Query<&mut DirectionalLightViewEntities>,
     ),
     sorted_cameras: Res<SortedCameras>,
-    (gpu_preprocessing_support, decals): (
+    (gpu_preprocessing_support, decals, render_origin): (
         Res<GpuPreprocessingSupport>,
         Option<Res<RenderClusteredDecals>>,
+        Option<Res<RenderOrigin>>,
     ),
     (existing_shadow_views, mut light_key_cache, mut specialized_shadow_material_pipeline_cache): (
         Query<&ShadowView>,
@@ -1125,6 +1129,9 @@ pub fn prepare_lights(
         ResMut<SpecializedShadowMaterialPipelineCache>,
     ),
 ) {
+    // What is handed to the GPU is taken about the render origin; the shadow
+    // views made here are taken about it when their uniforms are made.
+    let origin = RenderOrigin::for_view(render_origin.as_deref(), true);
     let views_iter = views.iter();
     let views_count = views_iter.len();
     let Some(mut view_gpu_lights_writer) =
@@ -1378,7 +1385,7 @@ pub fn prepare_lights(
                 color_inverse_square_range: (light.color.to_vec4() * light.intensity)
                     .xyz()
                     .extend(1.0 / (light.range * light.range)),
-                position_radius: light.transform.translation().extend(light.radius),
+                position_radius: (light.transform.translation() - origin).extend(light.radius),
                 flags: flags.bits(),
                 shadow_depth_bias: light.shadow_depth_bias,
                 shadow_normal_bias: light.shadow_normal_bias,
@@ -1417,7 +1424,7 @@ pub fn prepare_lights(
                     color_inverse_square_range: (light.color.to_vec4() * light.intensity)
                         .xyz()
                         .extend(light.height),
-                    position_radius: light.transform.translation().extend(light.width),
+                    position_radius: (light.transform.translation() - origin).extend(light.width),
                     flags: PointLightFlags::RECT_LIGHT.bits(),
                     shadow_depth_bias: 0.0,
                     shadow_normal_bias: 0.0,
@@ -1949,7 +1956,7 @@ pub fn prepare_lights(
             {
                 gpu_lights.directional_lights[light_index].cascades[cascade_index] =
                     GpuDirectionalCascade {
-                        clip_from_world: cascade.clip_from_world,
+                        clip_from_world: RenderOrigin::from_world(origin, cascade.clip_from_world),
                         texel_size: cascade.texel_size,
                         far_bound: *bound,
                     };
@@ -2078,7 +2085,7 @@ pub fn prepare_lights(
                 let up = rect_light.transform.up().into();
                 gpu_lights.rect_lights[index] = GpuRectLight {
                     color: rect_light.color.to_vec4() * rect_light.intensity,
-                    position: rect_light.transform.translation(),
+                    position: rect_light.transform.translation() - origin,
                     right,
                     up,
                     width: rect_light.width,

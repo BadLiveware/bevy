@@ -159,6 +159,16 @@ fn view_frustum_intersects_obb(
     return true;
 }
 
+/// A transform's transposed affine matrix, its translation (the last column of
+/// each row) taken about the view's `render_origin`.
+fn about_render_origin(m: mat3x4<f32>) -> mat3x4<f32> {
+    return mat3x4<f32>(
+        vec4(m[0].xyz, m[0].w - view.render_origin.x),
+        vec4(m[1].xyz, m[1].w - view.render_origin.y),
+        vec4(m[2].xyz, m[2].w - view.render_origin.z),
+    );
+}
+
 @compute
 @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
@@ -192,8 +202,10 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
 @if(!INDIRECT)
     let mesh_output_index = work_items[instance_index].output_or_indirect_parameters_index;
 
-    // Unpack the input matrix.
-    let world_from_local_affine_transpose = current_input[input_index].world_from_local;
+    // Unpack the input matrix, about the view's render origin (`RenderOrigin`:
+    // its translation less the origin, exact near it).
+    let world_from_local_affine_transpose =
+        about_render_origin(current_input[input_index].world_from_local);
     let world_from_local = maths::affine3_to_square(world_from_local_affine_transpose);
 
 @if(FRUSTUM_CULLING) {
@@ -247,7 +259,7 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     var previous_world_from_local_affine_transpose: mat3x4<f32>;
     if (mesh_changed_this_frame && previous_input_index != 0xffffffffu) {
         previous_world_from_local_affine_transpose =
-            previous_input[previous_input_index].world_from_local;
+            about_render_origin(previous_input[previous_input_index].world_from_local);
     } else {
         previous_world_from_local_affine_transpose = world_from_local_affine_transpose;
     }

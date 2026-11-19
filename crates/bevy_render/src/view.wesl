@@ -94,6 +94,10 @@ struct View {
     color_grading: ColorGrading,
     mip_bias: f32,
     frame_count: u32,
+    /// The world position every other position and matrix of this view is
+    /// taken about (`RenderOrigin`); zero when the view does not use one. A
+    /// position the GPU is given plus this is a position in the world.
+    render_origin: vec3<f32>,
 };
 
 // -----------------

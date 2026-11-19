@@ -26,7 +26,7 @@ use bevy_material::{
     key::{ErasedMaterialPipelineKey, ErasedMeshPipelineKey},
     AlphaMode, MaterialProperties, OpaqueRendererMethod, RenderPhaseType,
 };
-use bevy_math::{Affine3A, Mat4, Vec2, Vec4};
+use bevy_math::{Affine3A, Mat4, Vec2, Vec3, Vec4};
 use bevy_mesh::{Mesh, Mesh3d, MeshAttributeCompressionFlags, MeshVertexBufferLayoutRef};
 use bevy_render::{
     batching::gpu_preprocessing::GpuPreprocessingSupport,
@@ -39,8 +39,9 @@ use bevy_render::{
     renderer::{RenderAdapter, RenderDevice, RenderQueue},
     sync_world::{MainEntityHashSet, RenderEntity},
     view::{
-        ExtractedView, Msaa, RenderVisibilityRanges, RenderVisibleEntities, RetainedViewEntity,
-        ViewUniform, ViewUniformOffset, ViewUniforms, VISIBILITY_RANGES_STORAGE_BUFFER_COUNT,
+        ExtractedView, Msaa, RenderOrigin, RenderVisibilityRanges, RenderVisibleEntities,
+        RetainedViewEntity, UsesRenderOrigin, ViewUniform, ViewUniformOffset, ViewUniforms,
+        VISIBILITY_RANGES_STORAGE_BUFFER_COUNT,
     },
     Extract, ExtractSchedule, GpuResourceAppExt, Render, RenderApp, RenderDebugFlags,
     RenderStartup, RenderSystems,
@@ -196,9 +197,13 @@ struct AnyPrepassPluginLoaded;
 pub fn update_previous_view_data(
     mut commands: Commands,
     query: Query<(Entity, &Camera, &GlobalTransform), Or<(With<Camera3d>, With<ShadowView>)>>,
+    render_origin: Option<Res<RenderOrigin>>,
 ) {
+    // Taken about the render origin as it is now; the render world takes it
+    // about the next frame's, if that moved (`prepare_previous_view_uniforms`).
+    let origin = RenderOrigin::for_view(render_origin.as_deref(), true);
     for (entity, camera, camera_transform) in &query {
-        let world_from_view = camera_transform.affine();
+        let world_from_view = RenderOrigin::to_world_affine(origin, camera_transform.affine());
         let view_from_world = Mat4::from(world_from_view.inverse());
         let view_from_clip = camera.clip_from_view().inverse();
 
@@ -213,6 +218,9 @@ pub fn update_previous_view_data(
             world_from_clip: Mat4::from(world_from_view) * view_from_clip,
             view_from_clip,
         });
+        commands
+            .entity(entity)
+            .try_insert(PreviousViewRenderOrigin(origin));
     }
 }
 
@@ -707,18 +715,31 @@ impl PrepassPipeline {
 // Extract the render phases for the prepass
 pub fn extract_camera_previous_view_data(
     mut commands: Commands,
-    cameras_3d: Extract<Query<(RenderEntity, &Camera, Option<&PreviousViewData>), With<Camera3d>>>,
+    cameras_3d: Extract<
+        Query<
+            (
+                RenderEntity,
+                &Camera,
+                Option<&PreviousViewData>,
+                Option<&PreviousViewRenderOrigin>,
+            ),
+            With<Camera3d>,
+        >,
+    >,
 ) {
-    for (entity, camera, maybe_previous_view_data) in cameras_3d.iter() {
+    for (entity, camera, maybe_previous_view_data, previous_origin) in cameras_3d.iter() {
         let mut entity = commands
             .get_entity(entity)
             .expect("Camera entity wasn't synced.");
         if camera.is_active {
             if let Some(previous_view_data) = maybe_previous_view_data {
-                entity.insert(previous_view_data.clone());
+                entity.insert((
+                    previous_view_data.clone(),
+                    previous_origin.copied().unwrap_or_default(),
+                ));
             }
         } else {
-            entity.remove::<PreviousViewData>();
+            entity.remove::<(PreviousViewData, PreviousViewRenderOrigin)>();
         }
     }
 }
@@ -736,9 +757,12 @@ pub fn prepare_previous_view_uniforms(
             Option<&PreviousTemporalJitter>,
             Option<&TemporalJitter>,
             Option<&MainPassResolutionOverride>,
+            Option<&PreviousViewRenderOrigin>,
+            Has<UsesRenderOrigin>,
         ),
         Or<(With<Camera3d>, With<ShadowView>)>,
     >,
+    render_origin: Option<Res<RenderOrigin>>,
 ) {
     let views_iter = views.iter();
     let view_count = views_iter.len();
@@ -757,12 +781,31 @@ pub fn prepare_previous_view_uniforms(
         maybe_previous_jitter,
         maybe_jitter,
         resolution_override,
+        previous_origin,
+        uses_render_origin,
     ) in views_iter
     {
+        // Last frame's view about this frame's render origin, as everything
+        // else of this frame is (`RenderOrigin`).
+        let origin = RenderOrigin::for_view(render_origin.as_deref(), uses_render_origin);
         let mut prev_view_data = match maybe_previous_view_uniforms {
-            Some(previous_view) => previous_view.clone(),
+            Some(previous_view) => {
+                let mut data = previous_view.clone();
+                // Taken about another origin: a point about this one is
+                // `moved` further from it.
+                let moved = origin - previous_origin.map_or(Vec3::ZERO, |o| o.0);
+                if moved != Vec3::ZERO {
+                    data.view_from_world = RenderOrigin::from_world(moved, data.view_from_world);
+                    data.clip_from_world = RenderOrigin::from_world(moved, data.clip_from_world);
+                    data.unjittered_clip_from_world =
+                        RenderOrigin::from_world(moved, data.unjittered_clip_from_world);
+                    data.world_from_clip = RenderOrigin::to_world(moved, data.world_from_clip);
+                }
+                data
+            }
             None => {
-                let world_from_view = camera.world_from_view.affine();
+                let world_from_view =
+                    RenderOrigin::to_world_affine(origin, camera.world_from_view.affine());
                 let view_from_world = Mat4::from(world_from_view.inverse());
                 let view_from_clip = camera.clip_from_view.inverse();
 

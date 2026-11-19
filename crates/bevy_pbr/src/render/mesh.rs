@@ -68,7 +68,7 @@ use bevy_render::{
     renderer::{RenderAdapter, RenderDevice, RenderQueue},
     sync_world::MainEntityHashSet,
     texture::{DefaultImageSampler, GpuImage},
-    view::{self, NoIndirectDrawing, RenderVisibilityRanges, RetainedViewEntity},
+    view::{self, NoIndirectDrawing, RenderOrigin, RenderVisibilityRanges, RetainedViewEntity},
     Extract,
 };
 use bevy_shader::{load_shader_library, Shader, ShaderDefVal, ShaderSettings};
@@ -521,6 +521,22 @@ pub struct MeshTransforms {
     pub world_from_local: Affine3,
     pub previous_world_from_local: Affine3,
     pub flags: u32,
+}
+
+impl MeshTransforms {
+    /// These transforms about a render origin (`RenderOrigin`): their
+    /// translations less it.
+    pub fn about(&self, origin: Vec3) -> MeshTransforms {
+        let about = |affine: &Affine3| Affine3 {
+            matrix3: affine.matrix3,
+            translation: affine.translation - origin,
+        };
+        MeshTransforms {
+            world_from_local: about(&self.world_from_local),
+            previous_world_from_local: about(&self.previous_world_from_local),
+            flags: self.flags,
+        }
+    }
 }
 
 #[derive(ShaderType, Clone)]
@@ -2900,6 +2916,7 @@ impl GetBatchData for MeshPipeline {
         SRes<MeshAllocator>,
         SRes<SkinUniforms>,
         SRes<MorphIndices>,
+        Option<SRes<RenderOrigin>>,
     );
     type BatchSetCompareData = MeshBatchSetCompareData;
     type BatchCompareData = AssetId<Mesh>;
@@ -2907,7 +2924,7 @@ impl GetBatchData for MeshPipeline {
     type BufferData = MeshUniform;
 
     fn get_batch_data(
-        (mesh_instances, lightmaps, mesh_allocator, skin_uniforms, morph_indices): &SystemParamItem<
+        (mesh_instances, lightmaps, mesh_allocator, skin_uniforms, morph_indices, render_origin): &SystemParamItem<
             Self::Param,
         >,
         (_entity, main_entity): (Entity, MainEntity),
@@ -2941,7 +2958,9 @@ impl GetBatchData for MeshPipeline {
 
         Some((
             MeshUniform::new(
-                &mesh_instance.transforms,
+                &mesh_instance
+                    .transforms
+                    .about(RenderOrigin::for_view(render_origin.as_deref(), true)),
                 first_vertex_index,
                 material_bind_group_index.slot,
                 maybe_lightmap.map(|lightmap| (lightmap.slot_index, lightmap.uv_rect)),
@@ -2966,7 +2985,7 @@ impl GetFullBatchData for MeshPipeline {
     type BufferInputData = MeshInputUniform;
 
     fn get_index_and_compare_data(
-        (mesh_instances, lightmaps, mesh_allocator, _, _): &SystemParamItem<Self::Param>,
+        (mesh_instances, lightmaps, mesh_allocator, _, _, _): &SystemParamItem<Self::Param>,
         main_entity: MainEntity,
     ) -> Option<(
         NonMaxU32,
@@ -3000,7 +3019,7 @@ impl GetFullBatchData for MeshPipeline {
     }
 
     fn get_binned_batch_data(
-        (mesh_instances, lightmaps, mesh_allocator, skin_uniforms, morph_indices): &SystemParamItem<
+        (mesh_instances, lightmaps, mesh_allocator, skin_uniforms, morph_indices, render_origin): &SystemParamItem<
             Self::Param,
         >,
         main_entity: MainEntity,
@@ -3027,7 +3046,9 @@ impl GetFullBatchData for MeshPipeline {
             .map(|mesh_metadata_slice| mesh_metadata_slice.range.start);
 
         Some(MeshUniform::new(
-            &mesh_instance.transforms,
+            &mesh_instance
+                .transforms
+                .about(RenderOrigin::for_view(render_origin.as_deref(), true)),
             first_vertex_index,
             mesh_instance.material_bindings_index().slot,
             maybe_lightmap.map(|lightmap| (lightmap.slot_index, lightmap.uv_rect)),
@@ -3039,7 +3060,7 @@ impl GetFullBatchData for MeshPipeline {
     }
 
     fn get_binned_index(
-        (mesh_instances, _, _, _, _): &SystemParamItem<Self::Param>,
+        (mesh_instances, _, _, _, _, _): &SystemParamItem<Self::Param>,
         main_entity: MainEntity,
     ) -> Option<NonMaxU32> {
         // This should only be called during GPU building.

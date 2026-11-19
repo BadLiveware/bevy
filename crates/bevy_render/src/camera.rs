@@ -10,7 +10,7 @@ use crate::{
     sync_world::{MainEntity, MainEntityHashSet, RenderEntity, SyncToRenderWorld},
     texture::{GpuImage, ManualTextureViews},
     view::{
-        ColorGrading, ExtractedView, ExtractedWindow, Msaa, NoIndirectDrawing,
+        ColorGrading, ExtractedView, ExtractedWindow, Msaa, NoIndirectDrawing, UsesRenderOrigin,
         RenderExtractedVisibleEntities, RenderVisibleEntities, RenderVisibleEntitiesClass,
         ResolvedCompositingSpace, RetainedViewEntity, ViewUniformOffset,
         VisibilityExtractionSystemParam,
@@ -493,6 +493,7 @@ pub fn extract_cameras(
                 Option<&RenderLayers>,
                 Option<&Projection>,
                 Has<NoIndirectDrawing>,
+                Has<Camera3d>,
             ),
         )>,
     >,
@@ -519,6 +520,7 @@ pub fn extract_cameras(
         Projection,
         NoIndirectDrawing,
         ViewUniformOffset,
+        UsesRenderOrigin,
     );
 
     for (
@@ -540,6 +542,7 @@ pub fn extract_cameras(
             render_layers,
             projection,
             no_indirect_drawing,
+            camera_3d,
         ),
     ) in query.iter()
     {
@@ -686,6 +689,13 @@ pub fn extract_cameras(
                 commands.insert(projection.clone());
             } else {
                 commands.remove::<Projection>();
+            }
+
+            // A 3D camera's view is drawn about the `RenderOrigin`.
+            if camera_3d {
+                commands.insert(UsesRenderOrigin);
+            } else {
+                commands.remove::<UsesRenderOrigin>();
             }
 
             if no_indirect_drawing

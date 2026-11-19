@@ -47,6 +47,7 @@ use bevy_render::{
     sync_component::{SyncComponent, SyncComponentPlugin},
     sync_world::RenderEntity,
     texture::{FallbackImage, GpuImage},
+    view::RenderOrigin,
     Extract, ExtractSchedule, GpuResourceAppExt, Render, RenderApp, RenderSystems,
 };
 use bevy_shader::load_shader_library;
@@ -591,11 +592,18 @@ fn upload_decals(
     mut decals_buffer: ResMut<DecalsBuffer>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
+    render_origin: Option<Res<RenderOrigin>>,
 ) {
     decals_buffer.clear();
 
+    // Handed to the GPU about the render origin (`RenderOrigin`).
+    let origin = RenderOrigin::for_view(render_origin.as_deref(), true);
     for &decal in &render_decals.decals {
-        decals_buffer.push(decal);
+        decals_buffer.push(RenderClusteredDecal {
+            local_from_world: RenderOrigin::from_world(origin, decal.local_from_world),
+            world_position: decal.world_position - origin,
+            ..decal
+        });
     }
 
     // Make sure the buffer is non-empty.

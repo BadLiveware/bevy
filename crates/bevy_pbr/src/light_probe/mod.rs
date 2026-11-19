@@ -26,7 +26,7 @@ use bevy_render::{
     settings::WgpuFeatures,
     sync_world::{MainEntity, MainEntityHashMap, RenderEntity},
     texture::{FallbackImage, GpuImage},
-    view::ExtractedView,
+    view::{ExtractedView, RenderOrigin},
     Extract, ExtractSchedule, GpuResourceAppExt, Render, RenderApp, RenderSystems,
 };
 use bevy_shader::load_shader_library;
@@ -415,9 +415,11 @@ fn gather_light_probes<C>(
     >,
     mut view_light_probe_info: Local<Vec<LightProbeInfo<C>>>,
     mut commands: Commands,
+    render_origin: Extract<Option<Res<RenderOrigin>>>,
 ) where
     C: LightProbeComponent,
 {
+    let origin = RenderOrigin::for_view(render_origin.as_deref(), true);
     // Build up the light probes uniform and the key table.
     for (view_entity, view_transform, visible_entities, view_component) in view_query.iter() {
         view_light_probe_info.clear();
@@ -447,7 +449,7 @@ fn gather_light_probes<C>(
             C::create_render_view_light_probes(view_component, &image_assets);
 
         // Gather up the light probes in the list.
-        render_view_light_probes.maybe_gather_light_probes(&view_light_probe_info);
+        render_view_light_probes.maybe_gather_light_probes(&view_light_probe_info, origin);
 
         // Record the per-view light probes.
         if render_view_light_probes.is_empty() {
@@ -686,7 +688,9 @@ where
 
     /// Gathers up all light probes of the given type in the scene and records
     /// them in this structure.
-    fn maybe_gather_light_probes(&mut self, light_probes: &[LightProbeInfo<C>]) {
+    ///
+    /// They are handed to the GPU about `origin` (`RenderOrigin`).
+    fn maybe_gather_light_probes(&mut self, light_probes: &[LightProbeInfo<C>], origin: Vec3) {
         for light_probe in light_probes.iter().take(MAX_VIEW_LIGHT_PROBES) {
             // Determine the index of the cubemap in the binding array.
             let cubemap_index = self.get_or_insert_cubemap(&light_probe.asset_id);
@@ -697,12 +701,18 @@ where
             self.main_entity_to_render_light_probe_index
                 .insert(light_probe.main_entity, render_light_probe_index);
 
-            // Write in the light probe data.
+            // Write in the light probe data, about the render origin.
+            let world_from_light = RenderOrigin::to_world_affine(origin, light_probe.world_from_light);
+            let light_from_world_transposed = Mat4::from(world_from_light.inverse()).transpose();
             self.render_light_probes.push(RenderLightProbe {
-                light_from_world_transposed: light_probe.light_from_world,
+                light_from_world_transposed: [
+                    light_from_world_transposed.x_axis,
+                    light_from_world_transposed.y_axis,
+                    light_from_world_transposed.z_axis,
+                ],
                 falloff: light_probe.falloff,
                 parallax_correction_bounds: light_probe.parallax_correction_bounds,
-                world_position: light_probe.world_from_light.translation.into(),
+                world_position: world_from_light.translation.into(),
                 bounding_sphere_radius: light_probe.bounding_sphere_radius,
                 texture_index: cubemap_index as i32,
                 intensity: light_probe.intensity,

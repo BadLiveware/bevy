@@ -1,4 +1,5 @@
 pub mod composition;
+pub mod render_origin;
 pub mod visibility;
 pub mod window;
 
@@ -8,12 +9,14 @@ use bevy_camera::{
 };
 use bevy_diagnostic::FrameCount;
 pub use composition::*;
+pub use render_origin::*;
 pub use visibility::*;
 pub use window::*;
 
 use crate::{
     camera::{ExtractedCamera, MipBias, NormalizedRenderTargetExt as _, TemporalJitter},
     extract_component::ExtractComponentPlugin,
+    extract_resource::ExtractResourcePlugin,
     occlusion_culling::OcclusionCulling,
     render_asset::RenderAssets,
     render_phase::ViewRangefinder3d,
@@ -176,6 +179,7 @@ impl Plugin for ViewPlugin {
             .add_plugins((
                 ExtractComponentPlugin::<Msaa>::default(),
                 ExtractComponentPlugin::<OcclusionCulling>::default(),
+                ExtractResourcePlugin::<RenderOrigin>::default(),
                 RenderVisibilityRangePlugin,
             ));
 
@@ -755,6 +759,10 @@ pub struct ViewUniform {
     pub color_grading: ColorGradingUniform,
     pub mip_bias: f32,
     pub frame_count: u32,
+    /// The world position every other position and matrix of this view is
+    /// taken about ([`RenderOrigin`]); zero when the view does not use one.
+    /// A position the GPU is given plus this is a position in the world.
+    pub render_origin: Vec3,
 }
 
 #[derive(Resource)]
@@ -1185,9 +1193,11 @@ pub fn prepare_view_uniforms(
         Option<&TemporalJitter>,
         Option<&MipBias>,
         Option<&MainPassResolutionOverride>,
+        Has<UsesRenderOrigin>,
     )>,
     frame_count: Res<FrameCount>,
     shadow_lod_origin: Option<Res<RenderShadowLodOrigin>>,
+    render_origin: Option<Res<RenderOrigin>>,
 ) {
     let view_iter = views.iter();
     let view_count = view_iter.len();
@@ -1206,8 +1216,11 @@ pub fn prepare_view_uniforms(
         temporal_jitter,
         mip_bias,
         resolution_override,
+        uses_render_origin,
     ) in &views
     {
+        // Every position and matrix below is about this point (`RenderOrigin`).
+        let origin = RenderOrigin::for_view(render_origin.as_deref(), uses_render_origin);
         let viewport = extracted_view.viewport.as_vec4();
         let mut main_pass_viewport = viewport;
         if let Some(resolution_override) = resolution_override {
@@ -1223,7 +1236,10 @@ pub fn prepare_view_uniforms(
         }
 
         let view_from_clip = clip_from_view.inverse();
-        let world_from_view = extracted_view.world_from_view.to_matrix();
+        let world_from_view = Mat4::from(RenderOrigin::to_world_affine(
+            origin,
+            extracted_view.world_from_view.affine(),
+        ));
         let view_from_world = world_from_view.inverse();
 
         let clip_from_world = if temporal_jitter.is_some() {
@@ -1231,12 +1247,17 @@ pub fn prepare_view_uniforms(
         } else {
             extracted_view
                 .clip_from_world
+                .map(|clip_from_world| RenderOrigin::from_world(origin, clip_from_world))
                 .unwrap_or_else(|| clip_from_view * view_from_world)
         };
 
         // Map Frustum type to shader array<vec4<f32>, 6>
         let frustum = frustum
-            .map(|frustum| frustum.half_spaces.map(|h| h.normal_d()))
+            .map(|frustum| {
+                frustum
+                    .half_spaces
+                    .map(|h| RenderOrigin::half_space(origin, h.normal_d()))
+            })
             .unwrap_or([Vec4::ZERO; 6]);
 
         // Determine the position of the camera used for resolving visibility
@@ -1269,13 +1290,13 @@ pub fn prepare_view_uniforms(
                     .auxiliary_entity
                     .and_then(|entity| views.get(*entity).ok())
                 {
-                    Some((_, _, camera_view, _, _, _, _)) => {
+                    Some((_, _, camera_view, _, _, _, _, _)) => {
                         camera_view.world_from_view.translation()
                     }
                     None => shadow_lod_origin.0,
                 }
             }
-        };
+        } - origin;
 
         let view_uniforms = ViewUniformOffset {
             offset: writer.write(&ViewUniform {
@@ -1286,7 +1307,7 @@ pub fn prepare_view_uniforms(
                 view_from_world,
                 clip_from_view,
                 view_from_clip,
-                world_position: extracted_view.world_from_view.translation(),
+                world_position: extracted_view.world_from_view.translation() - origin,
                 exposure: extracted_camera
                     .map(|c| c.exposure)
                     .unwrap_or_else(|| Exposure::default().exposure()),
@@ -1297,6 +1318,7 @@ pub fn prepare_view_uniforms(
                 color_grading: extracted_view.color_grading.clone().into(),
                 mip_bias: mip_bias.unwrap_or(&MipBias(0.0)).0,
                 frame_count: frame_count.0,
+                render_origin: origin,
             }),
         };
 
