@@ -9,7 +9,7 @@ use bevy_ecs::{
     component::Component,
     entity::Entity,
     error::BevyError,
-    query::With,
+    query::{Has, With},
     resource::Resource,
     system::{Commands, Query, Res, ResMut},
     world::{FromWorld, World},
@@ -23,7 +23,10 @@ use bevy_render::{
     render_resource::{binding_types::*, *},
     renderer::{RenderDevice, RenderQueue},
     texture::{CachedTexture, TextureCache},
-    view::{ExtractedView, Msaa, ViewDepthStencilTexture, ViewUniform, ViewUniforms},
+    view::{
+        ExtractedView, Msaa, RenderOrigin, UsesRenderOrigin, ViewDepthStencilTexture, ViewUniform,
+        ViewUniforms,
+    },
 };
 use bevy_shader::Shader;
 use bevy_utils::default;
@@ -484,14 +487,17 @@ pub struct GpuAtmosphere {
 
 pub fn prepare_atmosphere_uniforms(
     mut commands: Commands,
-    atmospheres: Query<(Entity, &ExtractedAtmosphere)>,
+    atmospheres: Query<(Entity, &ExtractedAtmosphere, Has<UsesRenderOrigin>)>,
+    render_origin: Option<Res<RenderOrigin>>,
 ) -> Result<(), BevyError> {
-    for (entity, atmosphere) in atmospheres {
+    for (entity, atmosphere, uses_render_origin) in atmospheres {
+        // The view's positions are about the render origin; so is the planet.
+        let origin = RenderOrigin::for_view(render_origin.as_deref(), uses_render_origin);
         commands.entity(entity).insert(GpuAtmosphere {
             ground_albedo: atmosphere.ground_albedo,
             inner_radius: atmosphere.inner_radius,
             outer_radius: atmosphere.outer_radius,
-            world_to_atmosphere: atmosphere.world_to_atmosphere,
+            world_to_atmosphere: RenderOrigin::from_world(origin, atmosphere.world_to_atmosphere),
         });
     }
     Ok(())
@@ -535,9 +541,10 @@ impl AtmosphereTransformsOffset {
 
 pub(super) fn prepare_atmosphere_transforms(
     views: Query<
-        (Entity, &ExtractedView, &GpuAtmosphere),
+        (Entity, &ExtractedView, &GpuAtmosphere, Has<UsesRenderOrigin>),
         (With<ExtractedAtmosphere>, With<Camera3d>),
     >,
+    render_origin: Option<Res<RenderOrigin>>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     mut atmo_uniforms: ResMut<AtmosphereTransforms>,
@@ -552,9 +559,11 @@ pub(super) fn prepare_atmosphere_transforms(
         return;
     };
 
-    for (entity, view, gpu_atmosphere) in &views {
-        // Camera position in atmosphere space
-        let cam_world = view.world_from_view.translation();
+    for (entity, view, gpu_atmosphere, uses_render_origin) in &views {
+        // Camera position in atmosphere space (`world_to_atmosphere` takes
+        // positions about the render origin).
+        let origin = RenderOrigin::for_view(render_origin.as_deref(), uses_render_origin);
+        let cam_world = view.world_from_view.translation() - origin;
         let cam_pos = Vec3A::from(
             gpu_atmosphere
                 .world_to_atmosphere
@@ -578,7 +587,7 @@ pub(super) fn prepare_atmosphere_transforms(
             atmo_x,
             atmo_y,
             atmo_z,
-            view.world_from_view.translation_vec3a(),
+            Vec3A::from(cam_world),
         ));
         // The shader only uses the upper-left 3x3 block, where transpose equals inverse for
         // orthonormal matrices and is cheaper than computing the full inverse.

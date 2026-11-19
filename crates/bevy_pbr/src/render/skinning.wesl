@@ -1,5 +1,6 @@
 import package::render::mesh_types::SkinnedMesh;
 import package::render::mesh_bindings::mesh;
+import package::render::mesh_view_bindings::view;
 
 @if(SKINNED && SKINS_USE_UNIFORM_BUFFERS)
 @group(2) @binding(1) var<uniform> joint_matrices: SkinnedMesh;
@@ -17,6 +18,14 @@ import package::render::mesh_bindings::mesh;
 @if(SKINNED && !SKINS_USE_UNIFORM_BUFFERS)
 @group(2) @binding(6) var<storage> prev_joint_matrices: array<mat4x4<f32>>;
 
+/// A joint's matrix (in world space) about the view's render origin
+/// (`RenderOrigin`): its translation less the origin, taken before the
+/// joints are weighted, so that it is exact for joints near the origin.
+@if(SKINNED)
+fn about_render_origin(m: mat4x4<f32>) -> mat4x4<f32> {
+    return mat4x4<f32>(m[0], m[1], m[2], vec4(m[3].xyz - view.render_origin * m[3].w, m[3].w));
+}
+
 @if(SKINNED)
 fn skin_model(
     indexes: vec4<u32>,
@@ -24,17 +33,17 @@ fn skin_model(
     instance_index: u32,
 ) -> mat4x4<f32> {
 @if(SKINS_USE_UNIFORM_BUFFERS)
-    return weights.x * joint_matrices.data[indexes.x]
-        + weights.y * joint_matrices.data[indexes.y]
-        + weights.z * joint_matrices.data[indexes.z]
-        + weights.w * joint_matrices.data[indexes.w];
+    return weights.x * about_render_origin(joint_matrices.data[indexes.x])
+        + weights.y * about_render_origin(joint_matrices.data[indexes.y])
+        + weights.z * about_render_origin(joint_matrices.data[indexes.z])
+        + weights.w * about_render_origin(joint_matrices.data[indexes.w]);
 @if(!SKINS_USE_UNIFORM_BUFFERS)
     var skin_index = mesh[instance_index].current_skin_index;
 @if(!SKINS_USE_UNIFORM_BUFFERS)
-    return weights.x * joint_matrices[skin_index + indexes.x]
-        + weights.y * joint_matrices[skin_index + indexes.y]
-        + weights.z * joint_matrices[skin_index + indexes.z]
-        + weights.w * joint_matrices[skin_index + indexes.w];
+    return weights.x * about_render_origin(joint_matrices[skin_index + indexes.x])
+        + weights.y * about_render_origin(joint_matrices[skin_index + indexes.y])
+        + weights.z * about_render_origin(joint_matrices[skin_index + indexes.z])
+        + weights.w * about_render_origin(joint_matrices[skin_index + indexes.w]);
 }
 
 /// Returns the skinned position of a vertex with the given weights from the
@@ -48,17 +57,17 @@ fn skin_prev_model(
     instance_index: u32,
 ) -> mat4x4<f32> {
 @if(SKINS_USE_UNIFORM_BUFFERS)
-    return weights.x * prev_joint_matrices.data[indexes.x]
-        + weights.y * prev_joint_matrices.data[indexes.y]
-        + weights.z * prev_joint_matrices.data[indexes.z]
-        + weights.w * prev_joint_matrices.data[indexes.w];
+    return weights.x * about_render_origin(prev_joint_matrices.data[indexes.x])
+        + weights.y * about_render_origin(prev_joint_matrices.data[indexes.y])
+        + weights.z * about_render_origin(prev_joint_matrices.data[indexes.z])
+        + weights.w * about_render_origin(prev_joint_matrices.data[indexes.w]);
 @if(!SKINS_USE_UNIFORM_BUFFERS)
     let skin_index = mesh[instance_index].current_skin_index;
 @if(!SKINS_USE_UNIFORM_BUFFERS)
-    return weights.x * prev_joint_matrices[skin_index + indexes.x]
-        + weights.y * prev_joint_matrices[skin_index + indexes.y]
-        + weights.z * prev_joint_matrices[skin_index + indexes.z]
-        + weights.w * prev_joint_matrices[skin_index + indexes.w];
+    return weights.x * about_render_origin(prev_joint_matrices[skin_index + indexes.x])
+        + weights.y * about_render_origin(prev_joint_matrices[skin_index + indexes.y])
+        + weights.z * about_render_origin(prev_joint_matrices[skin_index + indexes.z])
+        + weights.w * about_render_origin(prev_joint_matrices[skin_index + indexes.w]);
 }
 
 @if(SKINNED)

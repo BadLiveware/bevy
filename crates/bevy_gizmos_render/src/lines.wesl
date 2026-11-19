@@ -48,7 +48,7 @@ fn vertex(vertex: VertexInput) -> VertexOutput {
     );
     let position = positions[vertex.index];
 
-    let world_from_local = affine3_to_square(line_gizmo.world_from_local);
+    let world_from_local = about_render_origin(affine3_to_square(line_gizmo.world_from_local));
 
     // algorithm based on https://wwwtyro.net/2019/11/18/instanced-lines.html
     var clip_a = view.clip_from_world * world_from_local * vec4(vertex.position_a, 1.);
@@ -196,4 +196,10 @@ fn fragment_dashed(in: FragmentInput) -> FragmentOutput {
     let alpha = 1.0 - floor(min(uv / in.line_fraction, 1.0));
 
     return FragmentOutput(vec4(in.color.xyz, in.color.w * alpha));
+}
+
+/// A gizmo's transform about the view's render origin (`RenderOrigin`): the
+/// view's positions are taken about it.
+fn about_render_origin(m: mat4x4<f32>) -> mat4x4<f32> {
+    return mat4x4<f32>(m[0], m[1], m[2], vec4(m[3].xyz - view.render_origin, m[3].w));
 }
