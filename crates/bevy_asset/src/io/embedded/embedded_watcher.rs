@@ -78,7 +78,11 @@ impl FilesystemEventHandler for EmbeddedEventHandler {
 
     fn handle(&mut self, absolute_paths: &[PathBuf], event: AssetSourceEvent) {
         if self.last_event.as_ref() != Some(&event) {
-            if let AssetSourceEvent::ModifiedAsset(path) = &event
+            // A file saved by writing another and renaming it over the old one (as many editors
+            // and tools save) is reported as added, not modified: its new contents are read for
+            // either, or the asset is reloaded from the bytes it had.
+            if let AssetSourceEvent::ModifiedAsset(path) | AssetSourceEvent::AddedAsset(path) =
+                &event
                 && let Ok(file) = File::open(&absolute_paths[0])
             {
                 let mut reader = BufReader::new(file);
