@@ -630,6 +630,7 @@ impl GltfLoader {
                     loader.supported_compressed_formats,
                     default_sampler,
                     settings,
+                    &extensions,
                 )
                 .await?;
                 image.process_loaded_texture(load_context, &mut texture_handles);
@@ -648,6 +649,7 @@ impl GltfLoader {
                         let asset_path = load_context.path().clone();
                         let linear_textures = &linear_textures;
                         let buffer_data = &buffer_data;
+                        let extensions = &extensions;
                         scope.spawn(async move {
                             load_image(
                                 gltf_texture,
@@ -657,6 +659,7 @@ impl GltfLoader {
                                 loader.supported_compressed_formats,
                                 default_sampler,
                                 settings,
+                                extensions,
                             )
                             .await
                         });
@@ -1206,8 +1209,29 @@ async fn load_image<'a, 'b>(
     supported_compressed_formats: CompressedImageFormats,
     default_sampler: &ImageSamplerDescriptor,
     settings: &GltfLoaderSettings,
+    extensions: &[Box<dyn extensions::ErasedGltfExtensionHandler>],
 ) -> Result<ImageOrPath, GltfError> {
     let is_srgb = !linear_textures.contains(&gltf_texture.index());
+    // An embedded image an extension handler supplies itself, in place of
+    // decoding its bytes.
+    let supplied = |bytes: &[u8], mime_type: &str, sampler: &ImageSamplerDescriptor| {
+        extensions.iter().find_map(|extension| {
+            extension
+                .embedded_image(
+                    gltf_path,
+                    &gltf_texture,
+                    bytes,
+                    mime_type,
+                    is_srgb,
+                    supported_compressed_formats,
+                )
+                .map(|mut image| {
+                    image.sampler = ImageSampler::Descriptor(sampler.clone());
+                    image.asset_usage = settings.load_materials;
+                    image
+                })
+        })
+    };
     let sampler_descriptor = if settings.override_sampler {
         default_sampler.clone()
     } else {
@@ -1219,14 +1243,17 @@ async fn load_image<'a, 'b>(
             let start = view.offset();
             let end = view.offset() + view.length();
             let buffer = &buffer_data[view.buffer().index()][start..end];
-            let image = Image::from_buffer(
-                buffer,
-                ImageType::MimeType(mime_type),
-                supported_compressed_formats,
-                is_srgb,
-                ImageSampler::Descriptor(sampler_descriptor),
-                settings.load_materials,
-            )?;
+            let image = match supplied(buffer, mime_type, &sampler_descriptor) {
+                Some(image) => image,
+                None => Image::from_buffer(
+                    buffer,
+                    ImageType::MimeType(mime_type),
+                    supported_compressed_formats,
+                    is_srgb,
+                    ImageSampler::Descriptor(sampler_descriptor),
+                    settings.load_materials,
+                )?,
+            };
             Ok(ImageOrPath::Image {
                 image,
                 label: GltfAssetLabel::Texture(gltf_texture.index()),
@@ -1239,16 +1266,20 @@ async fn load_image<'a, 'b>(
             let uri = uri.as_ref();
             if let Ok(data_uri) = DataUri::parse(uri) {
                 let bytes = data_uri.decode()?;
-                let image_type = ImageType::MimeType(data_uri.mime_type);
-                Ok(ImageOrPath::Image {
-                    image: Image::from_buffer(
+                let mime = mime_type.unwrap_or(data_uri.mime_type);
+                let image = match supplied(&bytes, mime, &sampler_descriptor) {
+                    Some(image) => image,
+                    None => Image::from_buffer(
                         &bytes,
-                        mime_type.map(ImageType::MimeType).unwrap_or(image_type),
+                        ImageType::MimeType(mime),
                         supported_compressed_formats,
                         is_srgb,
                         ImageSampler::Descriptor(sampler_descriptor),
                         settings.load_materials,
                     )?,
+                };
+                Ok(ImageOrPath::Image {
+                    image,
                     label: GltfAssetLabel::Texture(gltf_texture.index()),
                 })
             } else {

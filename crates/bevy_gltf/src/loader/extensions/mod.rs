@@ -7,12 +7,13 @@ mod khr_materials_specular;
 use alloc::sync::Arc;
 use async_lock::RwLock;
 
-use bevy_asset::{Handle, LoadContext};
+use bevy_asset::{AssetPath, Handle, LoadContext};
 use bevy_ecs::{
     entity::Entity,
     resource::Resource,
     world::{EntityWorldMut, World},
 };
+use bevy_image::CompressedImageFormats;
 use bevy_mesh::{Mesh, MeshVertexAttribute};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use gltf::Node;
@@ -115,6 +116,34 @@ pub trait GltfExtensionHandler: Send + Sync + 'static {
         reason = "default trait implementations do not use the arguments because they are no-ops"
     )]
     fn on_texture(&mut self, gltf_texture: &gltf::Texture, texture: Handle<bevy_image::Image>) {}
+
+    /// Called for a texture whose image is embedded in the glTF file (in a
+    /// buffer view or a data URI), before the loader decodes it.
+    ///
+    /// A handler may return the image itself, made or found from the
+    /// encoded `bytes` (a version of it prepared ahead of time, or a format
+    /// the loader does not read), and the loader then takes it in place of
+    /// decoding the bytes. The first handler to return an image is used; if
+    /// none does, the loader decodes the bytes as usual. The loader gives
+    /// the returned image the texture's sampler and the load's asset usage.
+    ///
+    /// Unlike the other hooks this takes `&self`, since the loader reads a
+    /// file's textures in parallel.
+    #[expect(
+        unused,
+        reason = "default trait implementations do not use the arguments because they are no-ops"
+    )]
+    fn embedded_image(
+        &self,
+        gltf_path: &AssetPath<'_>,
+        gltf_texture: &gltf::Texture,
+        bytes: &[u8],
+        mime_type: &str,
+        is_srgb: bool,
+        supported_compressed_formats: CompressedImageFormats,
+    ) -> Option<bevy_image::Image> {
+        None
+    }
 
     /// Called when an individual material is processed
     #[expect(
@@ -313,6 +342,18 @@ pub trait ErasedGltfExtensionHandler: Send + Sync + 'static {
     /// Called when an individual texture is processed
     fn on_texture(&mut self, gltf_texture: &gltf::Texture, texture: Handle<bevy_image::Image>);
 
+    /// Called for a texture whose image is embedded in the glTF file, before
+    /// the loader decodes it: an image in place of decoding it.
+    fn embedded_image(
+        &self,
+        gltf_path: &AssetPath<'_>,
+        gltf_texture: &gltf::Texture,
+        bytes: &[u8],
+        mime_type: &str,
+        is_srgb: bool,
+        supported_compressed_formats: CompressedImageFormats,
+    ) -> Option<bevy_image::Image>;
+
     /// Called when an individual material is processed
     fn on_material(
         &mut self,
@@ -441,6 +482,26 @@ impl<H: GltfExtensionHandler> ErasedGltfExtensionHandler for H {
 
     fn on_texture(&mut self, gltf_texture: &gltf::Texture, texture: Handle<bevy_image::Image>) {
         Self::on_texture(self, gltf_texture, texture);
+    }
+
+    fn embedded_image(
+        &self,
+        gltf_path: &AssetPath<'_>,
+        gltf_texture: &gltf::Texture,
+        bytes: &[u8],
+        mime_type: &str,
+        is_srgb: bool,
+        supported_compressed_formats: CompressedImageFormats,
+    ) -> Option<bevy_image::Image> {
+        Self::embedded_image(
+            self,
+            gltf_path,
+            gltf_texture,
+            bytes,
+            mime_type,
+            is_srgb,
+            supported_compressed_formats,
+        )
     }
 
     fn on_material(
