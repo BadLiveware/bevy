@@ -273,7 +273,17 @@ pub fn _embedded_asset_path(
         maybe_parent = parent.parent();
     };
     let asset_path = after_src.parent().unwrap().join(asset_path);
-    Path::new(crate_name).join(asset_path)
+    let path = Path::new(crate_name).join(asset_path);
+    // An asset path is written with `/` on every platform. On Windows `join`
+    // (and `file!()`) put `\` between the components, and the embedded watcher
+    // reports a changed file under the path registered here, so a change to
+    // `my_crate\foo/asset.wgsl` was not taken for the asset loaded as
+    // `embedded://my_crate/foo/asset.wgsl`.
+    if cfg!(target_family = "windows") {
+        PathBuf::from(path.to_string_lossy().replace('\\', "/"))
+    } else {
+        path
+    }
 }
 
 /// Creates a new `embedded` asset by embedding the bytes of the given path into the current binary
@@ -539,6 +549,19 @@ mod tests {
         );
         // Really, should be "my_crate/src/the/asset.png"
         assert_eq!(asset_path, Path::new("my_crate/the/asset.png"));
+    }
+
+    // The path is an asset path, with `/` between its components on every
+    // platform, whatever `file!()` gives.
+    #[test]
+    fn embedded_asset_path_from_backslashed_file_path() {
+        let asset_path = _embedded_asset_path(
+            "my_crate",
+            "src".as_ref(),
+            "src\\foo\\plugin.rs".as_ref(),
+            "the/asset.png".as_ref(),
+        );
+        assert_eq!(asset_path.to_str(), Some("my_crate/foo/the/asset.png"));
     }
 
     #[test]
