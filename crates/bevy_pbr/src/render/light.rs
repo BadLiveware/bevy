@@ -169,6 +169,9 @@ pub struct GpuDirectionalLight {
     decal_index: u32,
     sun_disk_angular_size: f32,
     sun_disk_intensity: f32,
+    far_shadow_index: u32,
+    far_shadow_blend: f32,
+    far_shadow_hand_over: f32,
 }
 
 // NOTE: These must match the bit flags in bevy_pbr/src/render/mesh_view_types.wesl!
@@ -1811,6 +1814,10 @@ pub fn prepare_lights(
                 flags |= DirectionalLightFlags::AFFECTS_LIGHTMAPPED_MESH_DIFFUSE;
             }
 
+            let far_shadow = decals
+                .as_ref()
+                .and_then(|decals| decals.far_shadow(*light_entity));
+
             gpu_directional_lights[index] = GpuDirectionalLight {
                 // Filled in later.
                 cascades: [GpuDirectionalCascade::default(); MAX_CASCADES_PER_LIGHT],
@@ -1833,6 +1840,9 @@ pub fn prepare_lights(
                     .and_then(|decals| decals.get(*light_entity))
                     .and_then(|index| index.try_into().ok())
                     .unwrap_or(u32::MAX),
+                far_shadow_index: far_shadow.map_or(u32::MAX, |far| far.decal_index),
+                far_shadow_blend: far_shadow.map_or(0.0, |far| far.blend),
+                far_shadow_hand_over: far_shadow.map_or(0.0, |far| far.hand_over),
             };
             num_directional_cascades_enabled_for_this_view += num_cascades;
         }
