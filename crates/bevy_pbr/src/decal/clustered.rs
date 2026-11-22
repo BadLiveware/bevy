@@ -79,6 +79,47 @@ pub struct LightTextureFrame {
     pub fades_along_z: bool,
 }
 
+/// A directional light's shadow beyond the reach of its cascades, from a
+/// height map: for each place of the map, the height above which the light
+/// reaches. Put it on a [`bevy_light::DirectionalLight`] that has shadow maps.
+///
+/// Along one ray of the light, everything above the highest point where the
+/// ray meets an opaque surface is lit, and everything below it is shaded. For
+/// ground that the light cannot pass through (terrain), the height at which
+/// the light begins over each place of a level plane is therefore the whole
+/// shadow, at any height: a surface is lit where it stands above that height,
+/// whatever it is. That map is cheap to make off the frame from the terrain's
+/// heights, and gives terrain its shadow out to any distance, where cascades
+/// end after a few hundred metres.
+///
+/// Fragments past the last cascade's far bound read the map; over the last
+/// `hand_over` share of that bound the cascades fade into it, so there is no
+/// line where they end.
+///
+/// Each map is a 2D texture of floats, read with `textureLoad` and filtered
+/// bilinearly by hand. A texel holds, in the map's own z units: in red and
+/// green, two parts whose sum is the height at which the light begins (two
+/// half floats hold a height to within millimetres where one cannot); in
+/// blue, how far above and below that height the light fades in (the
+/// penumbra, more than zero). Alpha is unused. Outside the map the light is
+/// whole. The two maps may be crossfaded (as when the light has moved and a
+/// new map is blended in).
+#[derive(Component, Clone, Debug)]
+pub struct DirectionalLightFarShadow {
+    /// The maps the shadow is read from: `blend` of the way from the first to
+    /// the second. They must have the same size.
+    pub images: [Handle<Image>; 2],
+    /// How far the shadow is from the first map to the second, 0 to 1.
+    pub blend: f32,
+    /// World space to the maps' space: x and y run from 0 to 1 over the maps
+    /// (x along the texture's width, y along its height), z is the height in
+    /// the units of the texels.
+    pub local_from_world: Affine3A,
+    /// The share of the last cascade's far bound over which the cascades give
+    /// way to the map, 0 to 1.
+    pub hand_over: f32,
+}
+
 /// The number of textures that can be associated with each clustered decal.
 const IMAGES_PER_DECAL: usize = 4;
 
@@ -110,6 +151,22 @@ pub struct RenderClusteredDecals {
     /// Maps the [`bevy_render::sync_world::RenderEntity`] of each decal to the
     /// index of that decal in the [`Self::decals`] list.
     entity_to_decal_index: EntityHashMap<usize>,
+    /// Maps each directional light with a [`DirectionalLightFarShadow`] to
+    /// its entry in [`Self::decals`], its blend and its hand-over.
+    entity_to_far_shadow: EntityHashMap<RenderFarShadow>,
+}
+
+/// Where a directional light's [`DirectionalLightFarShadow`] is in the decal
+/// buffer, and how it is read.
+#[derive(Clone, Copy, Debug)]
+pub struct RenderFarShadow {
+    /// The index of its entry in the decal buffer, which holds the maps'
+    /// frame and has the maps as its first two textures.
+    pub decal_index: u32,
+    /// How far the shadow is from the first map to the second.
+    pub blend: f32,
+    /// The share of the last cascade's far bound over which it takes over.
+    pub hand_over: f32,
 }
 
 impl RenderClusteredDecals {
@@ -121,6 +178,7 @@ impl RenderClusteredDecals {
         self.decals.clear();
         self.clusterable_decal_count = 0;
         self.entity_to_decal_index.clear();
+        self.entity_to_far_shadow.clear();
     }
 
     /// Inserts a decal into the buffer, along with its associated textures.
@@ -156,6 +214,11 @@ impl RenderClusteredDecals {
 
     pub fn get(&self, entity: Entity) -> Option<usize> {
         self.entity_to_decal_index.get(&entity).copied()
+    }
+
+    /// The far shadow of a directional light, if it has one.
+    pub fn far_shadow(&self, entity: Entity) -> Option<RenderFarShadow> {
+        self.entity_to_far_shadow.get(&entity).copied()
     }
 
     /// Returns the number of entries in the decal buffer, light textures included.
@@ -310,6 +373,7 @@ pub fn extract_decals(
             Option<&LightTextureFrame>,
         )>,
     >,
+    far_shadows: Extract<Query<(RenderEntity, &DirectionalLightFarShadow)>>,
     mut render_decals: ResMut<RenderClusteredDecals>,
 ) {
     // Clear out the `RenderClusteredDecals` in preparation for a new frame.
@@ -324,6 +388,42 @@ pub fn extract_decals(
     extract_spot_light_textures(&spot_light_textures, &mut render_decals);
     extract_point_light_textures(&point_light_textures, &mut render_decals);
     extract_directional_light_textures(&directional_light_textures, &mut render_decals);
+    extract_far_shadows(&far_shadows, &mut render_decals);
+}
+
+/// Extracts the far shadows of directional lights to the render world as
+/// entries of the decal buffer, which hold their maps and their frame.
+fn extract_far_shadows(
+    far_shadows: &Extract<Query<(RenderEntity, &DirectionalLightFarShadow)>>,
+    render_decals: &mut RenderClusteredDecals,
+) {
+    for (light_entity, far_shadow) in far_shadows {
+        let image_indices = [
+            render_decals.get_or_insert_image(&far_shadow.images[0].id()),
+            render_decals.get_or_insert_image(&far_shadow.images[1].id()),
+            -1,
+            -1,
+        ];
+        let decal_index = render_decals.decals.len() as u32;
+        render_decals.decals.push(RenderClusteredDecal {
+            local_from_world: Mat4::from(far_shadow.local_from_world),
+            image_indices,
+            world_position: Vec3::ZERO,
+            bounding_sphere_radius: 0.0,
+            tag: 0,
+            pad_a: 0,
+            pad_b: 0,
+            pad_c: 0,
+        });
+        render_decals.entity_to_far_shadow.insert(
+            light_entity,
+            RenderFarShadow {
+                decal_index,
+                blend: far_shadow.blend.clamp(0.0, 1.0),
+                hand_over: far_shadow.hand_over.clamp(0.0, 1.0),
+            },
+        );
+    }
 }
 
 /// Extracts all clustered decals and light textures from the scene and transfers

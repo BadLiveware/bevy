@@ -44,6 +44,13 @@ struct DirectionalLight {
     decal_index: u32,
     sun_disk_angular_size: f32,
     sun_disk_intensity: f32,
+    // The light's shadow beyond its cascades (`DirectionalLightFarShadow`):
+    // its entry in the decal buffer (0xFFFFFFFF for none), how far it is from
+    // its first map to its second, and the share of the last cascade's far
+    // bound over which the cascades give way to it.
+    far_shadow_index: u32,
+    far_shadow_blend: f32,
+    far_shadow_hand_over: f32,
 };
 
 const DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT: u32                  = 1u << 0u;

@@ -219,6 +219,85 @@ fn sample_directional_cascade(
     );
 }
 
+// A texel of a far shadow's map at `uv` (0 to 1 over the map), filtered
+// bilinearly by hand: the texels hold heights, and a map of them need not be
+// filterable in hardware.
+@if(CLUSTERED_DECALS_ARE_USABLE)
+fn far_shadow_texel(image_index: i32, uv: vec2<f32>) -> vec4<f32> {
+    let size = vec2<i32>(textureDimensions(view_bindings::clustered_decal_textures[image_index]));
+    let at = uv * vec2<f32>(size) - 0.5;
+    let corner = floor(at);
+    let f = at - corner;
+    let last = size - vec2<i32>(1);
+    let p0 = clamp(vec2<i32>(corner), vec2<i32>(0), last);
+    let p1 = clamp(vec2<i32>(corner) + vec2<i32>(1), vec2<i32>(0), last);
+    let a = textureLoad(view_bindings::clustered_decal_textures[image_index], p0, 0);
+    let b = textureLoad(view_bindings::clustered_decal_textures[image_index], vec2<i32>(p1.x, p0.y), 0);
+    let c = textureLoad(view_bindings::clustered_decal_textures[image_index], vec2<i32>(p0.x, p1.y), 0);
+    let d = textureLoad(view_bindings::clustered_decal_textures[image_index], p1, 0);
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// How much of a directional light reaches a point by its far shadow
+// (`DirectionalLightFarShadow`): 1 where the light has none, and outside its
+// maps. The maps hold, for each place, the height at which the light begins
+// (red plus green) and how far about it the light fades in (blue).
+@if(CLUSTERED_DECALS_ARE_USABLE)
+fn far_shadow(light_id: u32, world_position: vec3<f32>) -> f32 {
+    let light = &view_bindings::lights.directional_lights[light_id];
+    let index = (*light).far_shadow_index;
+    if (index == 0xFFFFFFFFu) {
+        return 1.0;
+    }
+    let decal = &view_bindings::clustered_decals.decals[index];
+    let local = ((*decal).local_from_world * vec4<f32>(world_position, 1.0)).xyz;
+    if (any(local.xy < vec2<f32>(0.0)) || any(local.xy > vec2<f32>(1.0))) {
+        return 1.0;
+    }
+    let blend = (*light).far_shadow_blend;
+    var texel: vec4<f32>;
+    if (blend <= 0.0) {
+        texel = far_shadow_texel((*decal).base_color_texture_index, local.xy);
+    } else if (blend >= 1.0) {
+        texel = far_shadow_texel((*decal).normal_map_texture_index, local.xy);
+    } else {
+        texel = mix(
+            far_shadow_texel((*decal).base_color_texture_index, local.xy),
+            far_shadow_texel((*decal).normal_map_texture_index, local.xy),
+            blend,
+        );
+    }
+    let soft = max(texel.b, 1e-4);
+    return smoothstep(-soft, soft, local.z - (texel.r + texel.g));
+}
+
+@if(!CLUSTERED_DECALS_ARE_USABLE)
+fn far_shadow(light_id: u32, world_position: vec3<f32>) -> f32 {
+    return 1.0;
+}
+
+// The last cascade's shadow, given way to the far shadow over the last
+// `far_shadow_hand_over` share of the cascade's far bound.
+@if(CLUSTERED_DECALS_ARE_USABLE)
+fn hand_over_to_far_shadow(light_id: u32, cascade_index: u32, shadow: f32, world_position: vec3<f32>, view_z: f32) -> f32 {
+    let light = &view_bindings::lights.directional_lights[light_id];
+    let hand_over = (*light).far_shadow_hand_over;
+    if ((*light).far_shadow_index == 0xFFFFFFFFu || hand_over <= 0.0) {
+        return shadow;
+    }
+    let far_bound = (*light).cascades[cascade_index].far_bound;
+    let hand_over_from = (1.0 - hand_over) * far_bound;
+    if (-view_z <= hand_over_from) {
+        return shadow;
+    }
+    return mix(shadow, far_shadow(light_id, world_position), saturate((-view_z - hand_over_from) / (far_bound - hand_over_from)));
+}
+
+@if(!CLUSTERED_DECALS_ARE_USABLE)
+fn hand_over_to_far_shadow(light_id: u32, cascade_index: u32, shadow: f32, world_position: vec3<f32>, view_z: f32) -> f32 {
+    return shadow;
+}
+
 fn fetch_directional_shadow(
     light_id: u32,
     frag_position: vec4<f32>,
@@ -229,8 +308,9 @@ fn fetch_directional_shadow(
     let light = &view_bindings::lights.directional_lights[light_id];
     let cascade_index = get_cascade_index(light_id, view_z);
 
+    // Past the cascades: the far shadow, where the light has one.
     if (cascade_index >= (*light).num_cascades) {
-        return 1.0;
+        return far_shadow(light_id, frag_position.xyz);
     }
 
     var shadow = sample_directional_cascade(
@@ -256,6 +336,9 @@ fn fetch_directional_shadow(
             );
             shadow = mix(shadow, next_shadow, (-view_z - next_near_bound) / (this_far_bound - next_near_bound));
         }
+    } else {
+        // The last cascade: it gives way to the far shadow over its end.
+        shadow = hand_over_to_far_shadow(light_id, cascade_index, shadow, frag_position.xyz, view_z);
     }
     return shadow;
 }
