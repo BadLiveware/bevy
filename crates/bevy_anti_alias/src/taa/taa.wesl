@@ -4,6 +4,8 @@
 // http://leiy.cc/publications/TAA/TAA_EG2020_Talk.pdf
 // https://advances.realtimerendering.com/s2014/index.html#_HIGH-QUALITY_TEMPORAL_SUPERSAMPLING
 
+import bevy_render::view::View;
+
 /// Controls how much to blend between the current and past samples
 /// Lower numbers = less of the current sample and more of the past sample = more smoothing
 /// Values chosen empirically
@@ -16,6 +18,13 @@ const MIN_HISTORY_BLEND_RATE: f32 = 0.015; // Minimum blend rate allowed, to ens
 @group(0) @binding(3) var depth: texture_depth_2d;
 @group(0) @binding(4) var nearest_sampler: sampler;
 @group(0) @binding(5) var linear_sampler: sampler;
+@group(0) @binding(6) var<uniform> view: View;
+
+// The textures are the size of the camera's target, and the camera's viewport may be a part of
+// it: samples are kept to the viewport, as a sampler clamps them to a texture's edge.
+var<private> sample_min: vec2<f32>;
+var<private> sample_max: vec2<f32>;
+fn in_viewport(uv: vec2<f32>) -> vec2<f32> { return clamp(uv, sample_min, sample_max); }
 
 struct Output {
     @location(0) view_target: vec4<f32>,
@@ -63,20 +72,26 @@ fn clip_towards_aabb_center(history_color: vec3<f32>, current_color: vec3<f32>, 
 }
 
 fn sample_history(u: f32, v: f32) -> vec3<f32> {
-    return textureSample(history, linear_sampler, vec2(u, v)).rgb;
+    return textureSample(history, linear_sampler, in_viewport(vec2(u, v))).rgb;
 }
 
 fn sample_view_target(uv: vec2<f32>) -> vec3<f32> {
-    var sample = textureSample(view_target, nearest_sampler, uv).rgb;
+    var sample = textureSample(view_target, nearest_sampler, in_viewport(uv)).rgb;
 @if(TONEMAP)
     sample = tonemap(sample);
     return RGB_to_YCoCg(sample);
 }
 
 @fragment
-fn taa(@location(0) uv: vec2<f32>) -> Output {
+fn taa(@builtin(position) frag_coord: vec4<f32>) -> Output {
     let texture_size = vec2<f32>(textureDimensions(view_target));
     let texel_size = 1.0 / texture_size;
+    // uv spans the whole target; the viewport is the part of it between viewport_min and viewport_max
+    let uv = frag_coord.xy * texel_size;
+    let viewport_min = view.viewport.xy * texel_size;
+    let viewport_max = (view.viewport.xy + view.viewport.zw) * texel_size;
+    sample_min = viewport_min + 0.5 * texel_size;
+    sample_max = viewport_max - 0.5 * texel_size;
 
     // Fetch the current sample
     let original_color = textureSample(view_target, nearest_sampler, uv);
@@ -94,11 +109,11 @@ fn taa(@location(0) uv: vec2<f32>) -> Output {
     let d_uv_bl = uv + vec2(-offset.x, -offset.y);
     let d_uv_br = uv + vec2(offset.x, -offset.y);
     var closest_uv = uv;
-    let d_tl = textureSample(depth, nearest_sampler, d_uv_tl);
-    let d_tr = textureSample(depth, nearest_sampler, d_uv_tr);
+    let d_tl = textureSample(depth, nearest_sampler, in_viewport(d_uv_tl));
+    let d_tr = textureSample(depth, nearest_sampler, in_viewport(d_uv_tr));
     var closest_depth = textureSample(depth, nearest_sampler, uv);
-    let d_bl = textureSample(depth, nearest_sampler, d_uv_bl);
-    let d_br = textureSample(depth, nearest_sampler, d_uv_br);
+    let d_bl = textureSample(depth, nearest_sampler, in_viewport(d_uv_bl));
+    let d_br = textureSample(depth, nearest_sampler, in_viewport(d_uv_br));
     if d_tl > closest_depth {
         closest_uv = d_uv_tl;
         closest_depth = d_tl;
@@ -114,7 +129,9 @@ fn taa(@location(0) uv: vec2<f32>) -> Output {
     if d_br > closest_depth {
         closest_uv = d_uv_br;
     }
-    let closest_motion_vector = textureSample(motion_vectors, nearest_sampler, closest_uv).rg;
+    // Motion vectors are in uv of the viewport
+    let closest_motion_vector = textureSample(motion_vectors, nearest_sampler, in_viewport(closest_uv)).rg
+        * view.viewport.zw * texel_size;
 
     // Reproject to find the equivalent sample from the past
     // Uses 5-sample Catmull-Rom filtering (reduces blurriness)
@@ -177,7 +194,7 @@ fn taa(@location(0) uv: vec2<f32>) -> Output {
     var current_color_factor = clamp(1.0 / history_confidence, MIN_HISTORY_BLEND_RATE, DEFAULT_HISTORY_BLEND_RATE);
 
     // Reject history when motion vectors point off screen
-    if any(saturate(history_uv) != history_uv) {
+    if any(clamp(history_uv, viewport_min, viewport_max) != history_uv) {
         current_color_factor = 1.0;
         history_confidence = 1.0;
     }
