@@ -5,11 +5,12 @@ use super::{
 use bevy_camera::MainPassResolutionOverride;
 use bevy_core_pipeline::prepass::ViewPrepassTextures;
 use bevy_ecs::system::Res;
+use bevy_math::Vec4Swizzles;
 use bevy_render::{
     camera::TemporalJitter,
     diagnostic::RecordDiagnostics,
     renderer::{RenderAdapter, RenderContext, ViewQuery},
-    view::ViewTarget,
+    view::{ExtractedView, ViewTarget},
 };
 use dlss_wgpu::{
     ray_reconstruction::{
@@ -24,14 +25,22 @@ pub fn dlss_super_resolution(
         &DlssRenderContext<DlssSuperResolutionFeature>,
         &MainPassResolutionOverride,
         &TemporalJitter,
+        &ExtractedView,
         &ViewTarget,
         &ViewPrepassTextures,
     )>,
     adapter: Res<RenderAdapter>,
     mut ctx: RenderContext,
 ) {
-    let (dlss, dlss_context, resolution_override, temporal_jitter, view_target, prepass_textures) =
-        view.into_inner();
+    let (
+        dlss,
+        dlss_context,
+        resolution_override,
+        temporal_jitter,
+        extracted_view,
+        view_target,
+        prepass_textures,
+    ) = view.into_inner();
 
     let (Some(prepass_depth_texture), Some(prepass_motion_vectors_texture)) =
         (&prepass_textures.depth, &prepass_textures.motion_vectors)
@@ -42,6 +51,9 @@ pub fn dlss_super_resolution(
     let view_target = view_target.post_process_write();
 
     let render_resolution = resolution_override.0;
+    // The main pass is drawn at the target's corner (`MainPassResolutionOverride`); the
+    // upscaled picture is written over the viewport.
+    let viewport_origin = extracted_view.viewport.xy().to_array();
     let render_parameters = DlssSuperResolutionRenderParameters {
         color: &view_target.source,
         depth: &prepass_depth_texture.texture.default_view,
@@ -52,6 +64,8 @@ pub fn dlss_super_resolution(
         reset: dlss.reset,
         jitter_offset: (-temporal_jitter.offset).to_array(),
         partial_texture_size: Some(render_resolution.to_array()),
+        partial_texture_origin: None,
+        dlss_output_origin: Some(viewport_origin),
         motion_vector_scale: Some((-render_resolution.as_vec2()).to_array()),
     };
 
@@ -74,6 +88,7 @@ pub fn dlss_ray_reconstruction(
         &DlssRenderContext<DlssRayReconstructionFeature>,
         &MainPassResolutionOverride,
         &TemporalJitter,
+        &ExtractedView,
         &ViewTarget,
         &ViewPrepassTextures,
         &ViewDlssRayReconstructionTextures,
@@ -86,6 +101,7 @@ pub fn dlss_ray_reconstruction(
         dlss_context,
         resolution_override,
         temporal_jitter,
+        extracted_view,
         view_target,
         prepass_textures,
         ray_reconstruction_textures,
@@ -122,6 +138,8 @@ pub fn dlss_ray_reconstruction(
         reset: dlss.reset,
         jitter_offset: (-temporal_jitter.offset).to_array(),
         partial_texture_size: Some(render_resolution.to_array()),
+        partial_texture_origin: None,
+        dlss_output_origin: Some(extracted_view.viewport.xy().to_array()),
         motion_vector_scale: Some((-render_resolution.as_vec2()).to_array()),
     };
 

@@ -116,12 +116,16 @@ impl Viewport {
         }
     }
 
+    /// The viewport the main pass is drawn into: the camera's viewport, or, under a
+    /// [`MainPassResolutionOverride`], a viewport of the override's size at the target's corner
+    /// (see there).
     pub fn from_viewport_and_override(
         viewport: Option<&Self>,
         main_pass_resolution_override: Option<&MainPassResolutionOverride>,
     ) -> Option<Self> {
         if let Some(override_size) = main_pass_resolution_override {
             let mut vp = viewport.map_or_else(Self::default, Self::clone);
+            vp.physical_position = UVec2::ZERO;
             vp.physical_size = **override_size;
             Some(vp)
         } else {
@@ -140,6 +144,9 @@ impl Viewport {
 /// * The resolution override must be smaller than the camera's viewport size.
 /// * The resolution override is specified in physical pixels.
 /// * In shaders, use `View::main_pass_viewport` instead of `View::viewport`.
+/// * The main pass is drawn at the corner of the camera's target, wherever the camera's viewport
+///   lies in it: the upscaler that takes the main pass to the viewport's size writes its output
+///   over the viewport.
 #[derive(Component, Reflect, Deref, Debug)]
 #[reflect(Component)]
 pub struct MainPassResolutionOverride(pub UVec2);

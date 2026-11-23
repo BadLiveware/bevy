@@ -8,7 +8,7 @@ use bevy_ecs::{
     query::With,
     system::{Commands, Query, Res},
 };
-use bevy_math::Vec4Swizzles;
+use bevy_math::{UVec2, Vec4Swizzles};
 use bevy_render::{
     camera::{MipBias, TemporalJitter},
     render_resource::TextureUsages,
@@ -69,10 +69,15 @@ pub fn prepare_dlss<F: DlssFeature>(
 
         let upscaled_resolution = view.viewport.zw();
 
-        let dlss_feature_flags = DlssFeatureFlags::LowResolutionMotionVectors
+        let mut dlss_feature_flags = DlssFeatureFlags::LowResolutionMotionVectors
             | DlssFeatureFlags::InvertedDepth
             | DlssFeatureFlags::HighDynamicRange
             | DlssFeatureFlags::AutoExposure; // TODO
+
+        // A viewport away from the target's corner is written to as a subrect of the output.
+        if view.viewport.xy() != UVec2::ZERO {
+            dlss_feature_flags |= DlssFeatureFlags::OutputSubrect;
+        }
 
         match dlss_context.as_deref_mut() {
             Some(dlss_context)
