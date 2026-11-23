@@ -22,7 +22,7 @@ use bevy_render::{
     camera::{ExtractedCamera, MipBias, TemporalJitter},
     diagnostic::RecordDiagnostics,
     render_resource::{
-        binding_types::{sampler, texture_2d, texture_depth_2d},
+        binding_types::{sampler, texture_2d, texture_depth_2d, uniform_buffer},
         BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
         CachedRenderPipelineId, Canonical, ColorTargetState, ColorWrites, FilterMode,
         FragmentState, Operations, PipelineCache, RenderPassColorAttachment, RenderPassDescriptor,
@@ -34,7 +34,7 @@ use bevy_render::{
     sync_component::{SyncComponent, SyncComponentPlugin},
     sync_world::RenderEntity,
     texture::{CachedTexture, TextureCache},
-    view::{ExtractedView, Msaa, ViewTarget},
+    view::{ExtractedView, Msaa, ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms},
     ExtractSchedule, MainWorld, Render, RenderApp, RenderStartup, RenderSystems,
 };
 use bevy_utils::default;
@@ -136,6 +136,7 @@ impl SyncComponent<RenderApp> for TemporalAntiAliasing {
 pub fn temporal_anti_alias(
     view: ViewQuery<(
         &ExtractedCamera,
+        &ViewUniformOffset,
         &ViewTarget,
         &TemporalAntiAliasHistoryTextures,
         &ViewPrepassTextures,
@@ -144,10 +145,18 @@ pub fn temporal_anti_alias(
     )>,
     pipelines: Option<Res<TaaPipeline>>,
     pipeline_cache: Res<PipelineCache>,
+    view_uniforms: Res<ViewUniforms>,
     mut ctx: RenderContext,
 ) {
-    let (camera, view_target, taa_history_textures, prepass_textures, taa_pipeline_id, msaa) =
-        view.into_inner();
+    let (
+        camera,
+        view_uniform_offset,
+        view_target,
+        taa_history_textures,
+        prepass_textures,
+        taa_pipeline_id,
+        msaa,
+    ) = view.into_inner();
 
     if *msaa != Msaa::Off {
         warn!("Temporal anti-aliasing requires MSAA to be disabled");
@@ -157,11 +166,18 @@ pub fn temporal_anti_alias(
     let Some(pipelines) = pipelines else {
         return;
     };
-    let (Some(taa_pipeline), Some(prepass_motion_vectors_texture), Some(prepass_depth_texture)) = (
+    let (
+        Some(taa_pipeline),
+        Some(prepass_motion_vectors_texture),
+        Some(prepass_depth_texture),
+        Some(view_uniforms_binding),
+    ) = (
         pipeline_cache.get_render_pipeline(taa_pipeline_id.0),
         &prepass_textures.motion_vectors,
         &prepass_textures.depth,
-    ) else {
+        view_uniforms.uniforms.binding(),
+    )
+    else {
         return;
     };
 
@@ -177,6 +193,7 @@ pub fn temporal_anti_alias(
             &prepass_depth_texture.texture.default_view,
             &pipelines.nearest_sampler,
             &pipelines.linear_sampler,
+            view_uniforms_binding,
         )),
     );
 
@@ -207,7 +224,7 @@ pub fn temporal_anti_alias(
     let pass_span = diagnostics.pass_span(&mut taa_pass, "taa");
 
     taa_pass.set_render_pipeline(taa_pipeline);
-    taa_pass.set_bind_group(0, &taa_bind_group, &[]);
+    taa_pass.set_bind_group(0, &taa_bind_group, &[view_uniform_offset.offset]);
     if let Some(viewport) = camera.viewport.as_ref() {
         taa_pass.set_camera_viewport(viewport);
     }
@@ -260,6 +277,8 @@ fn init_taa_pipeline(
                 sampler(SamplerBindingType::NonFiltering),
                 // Linear sampler
                 sampler(SamplerBindingType::Filtering),
+                // View
+                uniform_buffer::<ViewUniform>(true),
             ),
         ),
     );
