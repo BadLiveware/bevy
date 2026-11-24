@@ -54,7 +54,11 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass(
             Option<&Tonemapping>,
             Option<&DebandDither>,
             Option<&ShadowFilteringMethod>,
-            (Has<ScreenSpaceAmbientOcclusion>, Has<DistanceFog>),
+            (
+                Has<ScreenSpaceAmbientOcclusion>,
+                Has<AmbientOcclusionTexture>,
+                Has<DistanceFog>,
+            ),
             (
                 Has<NormalPrepass>,
                 Has<DepthPrepass>,
@@ -78,7 +82,7 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass(
         tonemapping,
         dither,
         shadow_filter_method,
-        (ssao, distance_fog),
+        (ssao, ambient_occlusion_given, distance_fog),
         (normal_prepass, depth_prepass, motion_vector_prepass, deferred_prepass),
         temporal_jitter,
         projection,
@@ -145,7 +149,7 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass(
             }
         }
 
-        if ssao {
+        if ssao || ambient_occlusion_given {
             view_key |= MeshPipelineKey::SCREEN_SPACE_AMBIENT_OCCLUSION;
         }
         if distance_fog {

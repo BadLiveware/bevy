@@ -54,9 +54,9 @@ use crate::{
     },
     prepass,
     resources::{AtmosphereBuffer, AtmosphereSampler, AtmosphereTextures, GpuAtmosphere},
-    Bluenoise, ExtractedAtmosphere, FogMeta, GlobalClusterableObjectMeta, GpuClusteredLights,
-    GpuFog, GpuLights, LightMeta, LightProbesBuffer, LightProbesUniform, MeshPipeline,
-    MeshPipelineKey, RenderViewLightProbes, ScreenSpaceAmbientOcclusionResources,
+    AmbientOcclusionTexture, Bluenoise, ExtractedAtmosphere, FogMeta, GlobalClusterableObjectMeta,
+    GpuClusteredLights, GpuFog, GpuLights, LightMeta, LightProbesBuffer, LightProbesUniform,
+    MeshPipeline, MeshPipelineKey, RenderViewLightProbes, ScreenSpaceAmbientOcclusionResources,
     ScreenSpaceReflectionsBuffer, ScreenSpaceReflectionsUniform, ShadowSamplers,
     ViewClusterBindings, ViewShadowBindings, ViewTransmissionTexture,
     CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT,
@@ -650,7 +650,10 @@ pub fn prepare_mesh_view_bind_groups(
         &ViewShadowBindings,
         &ViewClusterBindings,
         &Msaa,
-        Option<&ScreenSpaceAmbientOcclusionResources>,
+        (
+            Option<&ScreenSpaceAmbientOcclusionResources>,
+            Option<&AmbientOcclusionTexture>,
+        ),
         Option<&ViewPrepassTextures>,
         Option<&ViewTransmissionTexture>,
         Option<&AtmosphereTextures>,
@@ -723,7 +726,7 @@ pub fn prepare_mesh_view_bind_groups(
             shadow_bindings,
             cluster_bindings,
             msaa,
-            ssao_resources,
+            (ssao_resources, ambient_occlusion_given),
             prepass_textures,
             transmission_texture,
             atmosphere_textures,
@@ -858,11 +861,17 @@ pub fn prepare_mesh_view_bind_groups(
                 ));
             }
 
-            if let Some(ssao_resources) = ssao_resources {
+            // The view's ambient occlusion: the one given it by another
+            // where there is one, else this crate's own.
+            let ssao_view = ambient_occlusion_given.map(|given| &given.0).or_else(|| {
+                ssao_resources.map(|ssao_resources| {
+                    &ssao_resources
+                        .screen_space_ambient_occlusion_texture
+                        .default_view
+                })
+            });
+            if let Some(ssao_view) = ssao_view {
                 layout_key |= MeshPipelineViewLayoutKey::SCREEN_SPACE_AMBIENT_OCCLUSION;
-                let ssao_view = &ssao_resources
-                    .screen_space_ambient_occlusion_texture
-                    .default_view;
                 entries = entries.extend_with_indices(((17, ssao_view),));
             }
 
