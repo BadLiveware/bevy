@@ -650,6 +650,28 @@ fn prepare_ssao_pipelines(
     }
 }
 
+/// A render world component: a view's ambient occlusion, worked out by
+/// something other than [`ScreenSpaceAmbientOcclusionPlugin`].
+///
+/// A view with this component shades its meshes with this texture exactly as
+/// it would with the texture [`ScreenSpaceAmbientOcclusion`] produces, and
+/// takes this one where it has both. Whoever inserts it works the texture out
+/// before the view's main pass, and removes [`ScreenSpaceAmbientOcclusion`]
+/// from the camera if this plugin's own passes are not to run as well.
+///
+/// The texture holds, in its first channel, how much of the indirect light
+/// reaches each pixel (1.0: all of it). It is read with `textureLoad` at the
+/// fragment's position less the main pass viewport's origin, so it is at
+/// least as large as what the main pass draws. Any format a
+/// `texture_2d<f32>` binding takes will do.
+///
+/// The component is on the view by [`RenderSystems::PrepareAssets`] of the
+/// first frame it applies to, since the view's pipelines are specialized by
+/// its presence; the texture itself may be replaced until
+/// [`RenderSystems::PrepareBindGroups`].
+#[derive(Component, Clone)]
+pub struct AmbientOcclusionTexture(pub TextureView);
+
 /// A render world component that stores the bind groups necessary to perform
 /// Screen Space Ambient Occlusion.
 ///
