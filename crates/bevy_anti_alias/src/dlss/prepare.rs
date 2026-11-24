@@ -15,13 +15,14 @@ use bevy_render::{
     renderer::{RenderDevice, RenderQueue},
     view::ExtractedView,
 };
-use dlss_wgpu::{DlssFeatureFlags, DlssPerfQualityMode};
+use dlss_wgpu::{DlssFeatureFlags, DlssPerfQualityMode, DlssRenderPreset};
 use std::sync::{Arc, Mutex};
 
 #[derive(Component)]
 pub struct DlssRenderContext<F: DlssFeature> {
     pub context: Mutex<F::Context>,
     pub perf_quality_mode: DlssPerfQualityMode,
+    pub render_preset: DlssRenderPreset,
     pub feature_flags: DlssFeatureFlags,
 }
 
@@ -79,6 +80,7 @@ pub fn prepare_dlss<F: DlssFeature>(
                 if upscaled_resolution
                     == F::upscaled_resolution(&dlss_context.context.lock().unwrap())
                     && dlss.perf_quality_mode == dlss_context.perf_quality_mode
+                    && dlss.render_preset == dlss_context.render_preset
                     && dlss_feature_flags == dlss_context.feature_flags =>
             {
                 let dlss_context = dlss_context.context.lock().unwrap();
@@ -87,6 +89,14 @@ pub fn prepare_dlss<F: DlssFeature>(
                     F::suggested_jitter(&dlss_context, frame_count.0, render_resolution);
             }
             _ => {
+                // A context is created with the render preset the SDK
+                // holds at that moment.
+                dlss_sdk
+                    .0
+                    .lock()
+                    .unwrap()
+                    .set_super_resolution_render_preset(dlss.render_preset)
+                    .expect("Failed to set the DLSS render preset");
                 let dlss_context = F::new_context(
                     upscaled_resolution,
                     dlss.perf_quality_mode,
@@ -106,6 +116,7 @@ pub fn prepare_dlss<F: DlssFeature>(
                     DlssRenderContext::<F> {
                         context: Mutex::new(dlss_context),
                         perf_quality_mode: dlss.perf_quality_mode,
+                        render_preset: dlss.render_preset,
                         feature_flags: dlss_feature_flags,
                     },
                     MainPassResolutionOverride(render_resolution),

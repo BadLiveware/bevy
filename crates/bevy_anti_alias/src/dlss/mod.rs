@@ -18,7 +18,7 @@ mod extract;
 mod node;
 mod prepare;
 
-pub use dlss_wgpu::DlssPerfQualityMode;
+pub use dlss_wgpu::{DlssPerfQualityMode, DlssRenderPreset};
 
 use bevy_app::{App, Plugin};
 use bevy_camera::Hdr;
@@ -206,6 +206,12 @@ pub struct Dlss<F: DlssFeature = DlssSuperResolutionFeature> {
     /// How much upscaling should be applied.
     #[reflect(remote = DlssPerfQualityModeRemoteReflect)]
     pub perf_quality_mode: DlssPerfQualityMode,
+    /// Which of DLSS Super Resolution's models (render presets) to use.
+    ///
+    /// The default lets DLSS decide by the performance quality mode.
+    /// Changing it recreates the DLSS context. Ray reconstruction ignores it.
+    #[reflect(ignore)]
+    pub render_preset: DlssRenderPreset,
     /// Set to true to delete the saved temporal history (past frames).
     ///
     /// Useful for preventing ghosting when the history is no longer
@@ -222,6 +228,7 @@ impl<F: DlssFeature> Default for Dlss<F> {
     fn default() -> Self {
         Self {
             perf_quality_mode: Default::default(),
+            render_preset: Default::default(),
             reset: Default::default(),
             _phantom_data: Default::default(),
         }
