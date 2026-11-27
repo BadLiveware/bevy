@@ -82,7 +82,7 @@ fn fetch_transmissive_background_non_rough(offset_position: vec2<f32>, frag_coor
 
     @if(DEPTH_PREPASS && !WEBGL2)
     // Use depth prepass data to reject values that are in front of the current fragment
-    if prepass_utils::prepass_depth(vec4<f32>(offset_position * view_bindings::view.viewport.zw, 0.0, 0.0), 0u) > frag_coord.z {
+    if prepass_utils::prepass_depth(vec4<f32>(offset_position * vec2<f32>(textureDimensions(view_bindings::view_transmission_texture)), 0.0, 0.0), 0u) > frag_coord.z {
         background_color.a = 0.0;
     }
 
@@ -178,7 +178,7 @@ fn fetch_transmissive_background(offset_position: vec2<f32>, frag_coord: vec3<f3
 
         @if(DEPTH_PREPASS && !WEBGL2)
         // Use depth prepass data to reject values that are in front of the current fragment
-        if prepass_utils::prepass_depth(vec4<f32>(modified_offset_position * view_bindings::view.viewport.zw, 0.0, 0.0), 0u) > frag_coord.z {
+        if prepass_utils::prepass_depth(vec4<f32>(modified_offset_position * vec2<f32>(textureDimensions(view_bindings::view_transmission_texture)), 0.0, 0.0), 0u) > frag_coord.z {
             sample = vec4<f32>(0.0);
         }
 

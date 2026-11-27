@@ -1,17 +1,18 @@
+use bevy_camera::{MainPassResolutionOverride, Viewport};
 use bevy_core_pipeline::core_3d::{AlphaMask3d, Opaque3d, Transparent3d};
 use bevy_ecs::{
     component::Component,
     entity::Entity,
     system::{Commands, Query, Res, ResMut},
 };
-use bevy_image::ToExtents;
+use bevy_math::UVec2;
 use bevy_platform::collections::HashMap;
 use bevy_render::{
     camera::ExtractedCamera,
     render_phase::{ViewBinnedRenderPhases, ViewSortedRenderPhases},
     render_resource::{
-        FilterMode, Sampler, SamplerDescriptor, Texture, TextureDescriptor, TextureDimension,
-        TextureUsages, TextureView,
+        Extent3d, FilterMode, Sampler, SamplerDescriptor, Texture, TextureDescriptor,
+        TextureDimension, TextureUsages, TextureView,
     },
     renderer::RenderDevice,
     texture::TextureCache,
@@ -40,10 +41,39 @@ pub fn prepare_core_3d_transmission_textures(
         &ExtractedCamera,
         &ScreenSpaceTransmission,
         &ExtractedView,
+        Option<&MainPassResolutionOverride>,
     )>,
 ) {
+    // The part of each target the main passes draw into: the copy holds that
+    // and no more. Under an upscaler the main pass draws a corner of the
+    // target (`MainPassResolutionOverride`), and the rest of a copy of the
+    // whole target was never read: at 5120x2160 drawn at 3413x1440, 47 MB
+    // of 85. Shaders reach the copy through its own size
+    // (`textureDimensions`), so a smaller one reads the same pixels.
+    let mut extents = <HashMap<_, UVec2>>::default();
+    for (_, camera, transmission, _, resolution_override) in &views_3d {
+        let Some(physical_target_size) = camera.physical_target_size else {
+            continue;
+        };
+        if transmission.steps == 0 {
+            continue;
+        }
+        let extent = Viewport::from_viewport_and_override(
+            camera.viewport.as_ref(),
+            resolution_override,
+        )
+        .map_or(physical_target_size, |viewport| {
+            (viewport.physical_position + viewport.physical_size).min(physical_target_size)
+        })
+        .max(UVec2::ONE);
+        extents
+            .entry(camera.target.clone())
+            .and_modify(|e: &mut UVec2| *e = e.max(extent))
+            .or_insert(extent);
+    }
+
     let mut textures = <HashMap<_, _>>::default();
-    for (entity, camera, transmission, view) in &views_3d {
+    for (entity, camera, transmission, view, _) in &views_3d {
         if !opaque_3d_phases.contains_key(&view.retained_view_entity)
             || !alpha_mask_3d_phases.contains_key(&view.retained_view_entity)
             || !transparent_3d_phases.contains_key(&view.retained_view_entity)
@@ -56,14 +86,14 @@ pub fn prepare_core_3d_transmission_textures(
             continue;
         };
 
-        let Some(physical_target_size) = camera.physical_target_size else {
-            continue;
-        };
-
         // Don't prepare a transmission texture if the number of steps is set to 0
         if transmission.steps == 0 {
             continue;
         }
+
+        let Some(&extent) = extents.get(&camera.target) else {
+            continue;
+        };
 
         // Don't prepare a transmission texture if there are no transmissive items to render
         if transmissive_3d_phase.items.is_empty() {
@@ -77,8 +107,12 @@ pub fn prepare_core_3d_transmission_textures(
 
                 let descriptor = TextureDescriptor {
                     label: Some("view_transmission_texture"),
-                    // The size of the transmission texture
-                    size: physical_target_size.to_extents(),
+                    // The part of the target the main passes draw into
+                    size: Extent3d {
+                        width: extent.x,
+                        height: extent.y,
+                        depth_or_array_layers: 1,
+                    },
                     mip_level_count: 1,
                     sample_count: 1, // No need for MSAA, as we'll only copy the main texture here
                     dimension: TextureDimension::D2,
